@@ -1,20 +1,20 @@
 ﻿<#
 
 .SYNOPSIS
-Text
+WIP
 
 .DESCRIPTION
-Text
+WIP
 
 .NOTES
-Text
+WIP
 
 #>
 
 function FindUsedImages {
     param([string]$filename)
 
-    $hashImages = @{}
+    $arrayImages = @()
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zipArchive = [System.IO.Compression.ZipFile]::OpenRead($filename)
@@ -44,12 +44,14 @@ function FindUsedImages {
                 $rIdTotal = ([regex]::Matches($slideContent, $rId )).count
                 
                 if($rIdTotal -gt 0) {
-                    $rIds += $rIdTotal
+                    $rIds += @{"Total" = $rIdTotal}
                 }
                 $j++
             }
 
+            #Va chercher le ratio pour chaque rId (pour analyse future)
             #[xml]$slideContent = $reader.ReadToEnd()
+            #TODO: À completer
 
             $reader.Close()
             $slide.Close()
@@ -63,16 +65,18 @@ function FindUsedImages {
                 $reader = New-Object IO.StreamReader($rels)
                 [xml]$relsContent = $reader.ReadToEnd()
 
+                #Va chercher, pour chaque rId, le nom de l'image associée, puis met à jour les informations (ou ajoute l'entrée si non-existant)
                 for($j=2;$j -lt $rIds.Length;$j++) {
                     $rId = "rId" + $j
                     $image = $relsContent.Relationships.Relationship `
                     | Where-Object {($_.Id -eq $rId) -and ($_.Type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image")} `
                     | Foreach-Object {$_.Target.Substring(9)}
-                    if ($hashImages.ContainsKey($image)) {
-                        $hashImages.$image += $rIds[$j]
+                    if (($arrayImages.Count -gt 0) -and ($arrayImages.Values.Contains($image))) {
+                        $indexImage = [math]::floor($arrayImages.Values.indexof($image)/2)
+                        $arrayImages[$indexImage].Total = $rIds[$j].Total
                     }
                     else {
-                        $hashImages.$image = $rIds[$j]
+                        $arrayImages += @{"Total"= $rIds[$j].Total; "Name" = $image}
                     }
                 }
 
@@ -81,6 +85,7 @@ function FindUsedImages {
             }
 
             else {
+                #Normalement il y a toujours un fichier .rels d'associé à une diapositive
                 $errorMsg = "Erreur: Fichier " + $relsPath + " introuvable."
                 Write-Host $errorMsg
             }
@@ -92,32 +97,30 @@ function FindUsedImages {
         $i++
     }
     $zipArchive.Dispose()
-    return $hashImages
+    return $arrayImages
 }
 
 function EvalImages {
-    param([string]$filename, [hashtable]$hashImages)
-
-    $warningTable = @()
+    param([string]$filename, [hashtable[]]$hashImages)
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zipArchive = [System.IO.Compression.ZipFile]::OpenRead($filename)
 
-    $hashImages.GetEnumerator() | sort -property Value | ForEach-Object {
-        $imgPath = "ppt/media/" + $_.Key
+    foreach ($image in $hashImages) {
+        $imgPath = "ppt/media/" + $image.Name
         $entry = $zipArchive.GetEntry($imgPath)
 
-        #($entry.length / 1MB).toString("0.00MB") - Uncompressed file size
-
-        # TODO: Generate warnings, below is an example
+        # TODO: Générer les avertissements, exemple ci-dessous
 
         if (($entry.length / 1MB) -gt 1) {
-            $warningTable += @{"FileType" = "Image";"FileSize"=$entry.length;"Message"="Cette image à un poid supérieur à 1MB"}
+            $image.FileSize = $entry.Length
+            $image.FileType = "Image"
+            $image.Message = "Cette image à un poid supérieur à 1MB"
         }
     }
 
     $zipArchive.Dispose()
-    return $warningTable
+    return $hashImages
 }
 
 #Choose File
@@ -130,7 +133,9 @@ $result = $openFileDialog.ShowDialog()
 if (($result -eq "OK") -and $openFileDialog.CheckFileExists) {
 
     $images = FindUsedImages -filename $openFileDialog.FileName
-    $warnings = EvalImages -filename $openFileDialog.FileName -hashImages $images
 
-    $warnings
+    $images = EvalImages -filename $openFileDialog.FileName -hashImages $images
+
+    #Affichage temporaire
+    $images | Where-Object {$_.Message}
 }
