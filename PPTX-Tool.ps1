@@ -11,6 +11,17 @@ WIP
 
 #>
 
+function GetEntryAsXML {
+    param([System.IO.Compression.ZipArchiveEntry]$entry)
+
+    $slide = $entry.Open()
+    $reader = New-Object IO.StreamReader($slide)
+    [xml]$entryXML = $reader.ReadToEnd()
+    $reader.Close()
+    $slide.Close()
+    return $entryXML
+}
+
 function FindUsedImages {
     param([string]$filename)
 
@@ -29,59 +40,62 @@ function FindUsedImages {
 
         if ($entry) {
             $rIds = $null
-            $rIds = @(0,0)
+            $rIds = @()
 
-            $slide = $entry.Open()
-            $reader = New-Object IO.StreamReader($slide)
-            $slideContent = $reader.ReadToEnd()
+            $slideContent = GetEntryAsText $entry
 
-            #On incrémente et vérifie si le rId existe (rId utiles commencent à 2)
-            $j = 2
-            $rIdTotal = 1
-            while($rIdTotal -gt 0) {
-                
-                $rId = "rId" + $j
-                $rIdTotal = ([regex]::Matches($slideContent, $rId )).count
-                
-                if($rIdTotal -gt 0) {
-                    $rIds += @{"Total" = $rIdTotal}
+            #Va chercher le ratio et rId pour chaque image de la slide
+            [xml]$slideContent = $slideContent
+
+            foreach ($pic in $slideContent.sld.csld.sptree.pic) {
+                $rId = $pic.blipfill.blip.embed
+                if ($pic.sppr.xfrm.ext.cx -lt $pic.sppr.xfrm.ext.cy) {
+                    $ratio = $pic.sppr.xfrm.ext.cx / 914400
+                    
                 }
-                $j++
+                else {
+                    $ratio = $pic.sppr.xfrm.ext.cy / 914400
+                }
+
+                if (($rIds.Count -gt 0) -and ($rIds.Values.Contains($rId))) {
+                    $index = [math]::floor($rIds.Values.indexof($image)/$rIds[0].Count)
+                    $rIds[$index].Total++
+
+                    if ($rIds[$index].Ratio -gt $ratio) {
+                        $rIds[$index].Ratio = $ratio
+                    }
+                }
+                else {
+                    $rIds += @{"rId" = $rId;"Total" = 1; "Ratio" = $ratio}
+                }
             }
-
-            #Va chercher le ratio pour chaque rId (pour analyse future)
-            #[xml]$slideContent = $reader.ReadToEnd()
-            #TODO: À completer
-
-            $reader.Close()
-            $slide.Close()
 
             #Va chercher la bonne référence dans le fichier xml.rels 
             $relsPath = "ppt/slides/_rels/slide" + $i + ".xml.rels"
             $entry = $zipArchive.GetEntry($relsPath)
 
             if ($entry) {
-                $rels = $entry.Open()
-                $reader = New-Object IO.StreamReader($rels)
-                [xml]$relsContent = $reader.ReadToEnd()
+
+                [xml]$relsContent = GetEntryAsXML $entry
 
                 #Va chercher, pour chaque rId, le nom de l'image associée, puis met à jour les informations (ou ajoute l'entrée si non-existant)
-                for($j=2;$j -lt $rIds.Length;$j++) {
-                    $rId = "rId" + $j
+                for($j=0;$j -lt $rIds.Length;$j++) {
                     $image = $relsContent.Relationships.Relationship `
-                    | Where-Object {($_.Id -eq $rId) -and ($_.Type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image")} `
+                    | Where-Object {($_.Id -eq $rIds[$j].rId) -and ($_.Type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image")} `
                     | Foreach-Object {$_.Target.Substring(9)}
                     if (($arrayImages.Count -gt 0) -and ($arrayImages.Values.Contains($image))) {
-                        $indexImage = [math]::floor($arrayImages.Values.indexof($image)/2)
-                        $arrayImages[$indexImage].Total = $rIds[$j].Total
+                        $indexImage = [math]::floor($arrayImages.Values.indexof($image)/$rIds[0].Count)
+                        $arrayImages[$indexImage].Total = $arrayImages[$indexImage].Total + $rIds[$j].Total
+                        if ($arrayImages[$indexImage].Ratio -gt $rIds[$j].Ratio) {
+                            $arrayImages[$indexImage].Ratio = $rIds[$j].Ratio
+                        }
                     }
                     else {
-                        $arrayImages += @{"Total"= $rIds[$j].Total; "Name" = $image}
+                        $arrayImages += @{"Total"= $rIds[$j].Total; "Name" = $image; "Ratio" = $rIds[$j].Ratio}
                     }
                 }
 
-                $reader.Close()
-                $rels.Close()
+                
             }
 
             else {
@@ -123,7 +137,7 @@ function EvalImages {
     return $hashImages
 }
 
-#Choose File
+#Ouvre une fenêtre pour la sélection du fichier PowerPoint
 Add-Type -AssemblyName System.Windows.Forms
 $openFileDialog = New-Object Windows.Forms.OpenFileDialog
 $openFileDialog.initialDirectory = [System.IO.Directory]::GetCurrentDirectory()
