@@ -42,11 +42,9 @@ function FindUsedImages {
             $rIds = $null
             $rIds = @()
 
-            $slideContent = GetEntryAsText $entry
+            $slideContent = GetEntryAsXML $entry
 
             #Va chercher le ratio et rId pour chaque image de la slide
-            [xml]$slideContent = $slideContent
-
             foreach ($pic in $slideContent.sld.csld.sptree.pic) {
                 $rId = $pic.blipfill.blip.embed
                 if ($pic.sppr.xfrm.ext.cx -lt $pic.sppr.xfrm.ext.cy) {
