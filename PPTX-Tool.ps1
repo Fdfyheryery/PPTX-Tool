@@ -46,7 +46,10 @@ function FindUsedImages {
 
             #Va chercher le ratio et rId pour chaque image de la slide
             foreach ($pic in $slideContent.sld.csld.sptree.pic) {
+                #rID
                 $rId = $pic.blipfill.blip.embed
+
+                #Ratio (Image source : Image PPTX)
                 if ($pic.sppr.xfrm.ext.cx -lt $pic.sppr.xfrm.ext.cy) {
                     $ratio = $pic.sppr.xfrm.ext.cx / 914400
                     
@@ -55,6 +58,11 @@ function FindUsedImages {
                     $ratio = $pic.sppr.xfrm.ext.cy / 914400
                 }
 
+                #Utilisation (Rognage) (10000 = 10.000%)
+                $utilVertical = 100000 - ([int]$pic.blipfill.srcRect.t + [int]$pic.blipfill.srcRect.b)
+                $utilHorizontal = 100000 - ([int]$pic.blipfill.srcRect.l + [int]$pic.blipfill.srcRect.r)
+
+
                 if (($rIds.Count -gt 0) -and ($rIds.Values.Contains($rId))) {
                     $index = [math]::floor($rIds.Values.indexof($image)/$rIds[0].Count)
                     $rIds[$index].Total++
@@ -62,9 +70,17 @@ function FindUsedImages {
                     if ($rIds[$index].Ratio -gt $ratio) {
                         $rIds[$index].Ratio = $ratio
                     }
+
+                    if ($rIds[$index].UtilVertical -lt $utilVertical) {
+                        $rIds[$index].UtilVertical = $utilVertical
+                    }
+
+                    if ($rIds[$index].UtilHorizontal -lt $utilHorizontal) {
+                        $rIds[$index].UtilHorizontal = $utilHorizontal
+                    }
                 }
                 else {
-                    $rIds += @{"rId" = $rId;"Total" = 1; "Ratio" = $ratio}
+                    $rIds += @{"rId" = $rId;"Total" = 1; "Ratio" = $ratio; "UtilVertical" = $utilVertical; "UtilHorizontal" = $utilHorizontal}
                 }
             }
 
@@ -83,13 +99,23 @@ function FindUsedImages {
                     | Foreach-Object {$_.Target.Substring(9)}
                     if (($arrayImages.Count -gt 0) -and ($arrayImages.Values.Contains($image))) {
                         $indexImage = [math]::floor($arrayImages.Values.indexof($image)/$rIds[0].Count)
+
                         $arrayImages[$indexImage].Total = $arrayImages[$indexImage].Total + $rIds[$j].Total
+
                         if ($arrayImages[$indexImage].Ratio -gt $rIds[$j].Ratio) {
                             $arrayImages[$indexImage].Ratio = $rIds[$j].Ratio
                         }
+
+                        if ($arrayImages[$indexImage].UtilVertical -lt $rIds[$j].UtilVertical) {
+                            $arrayImages[$indexImage].UtilVertical = $rIds[$j].UtilVertical
+                        }
+
+                        if ($arrayImages[$indexImage].UtilHorizontal -lt $rIds[$j].UtilHorizontal) {
+                            $arrayImages[$indexImage].UtilHorizontal = $rIds[$j].UtilHorizontal
+                        }
                     }
                     else {
-                        $arrayImages += @{"Total"= $rIds[$j].Total; "Name" = $image; "Ratio" = $rIds[$j].Ratio}
+                        $arrayImages += @{"Total"= $rIds[$j].Total; "Name" = $image; "Ratio" = $rIds[$j].Ratio; "UtilVertical" = $rIds[$j].UtilVertical; "UtilHorizontal" = $rIds[$j].UtilHorizontal}
                     }
                 }
 
