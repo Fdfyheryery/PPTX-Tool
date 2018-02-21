@@ -98,9 +98,10 @@ function FindUsedImages {
                     | Where-Object {($_.Id -eq $rIds[$j].rId) -and ($_.Type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image")} `
                     | Foreach-Object {$_.Target.Substring(9)}
                     if (($arrayImages.Count -gt 0) -and ($arrayImages.Values.Contains($image))) {
-                        $indexImage = [math]::floor($arrayImages.Values.indexof($image)/$rIds[0].Count)
+                        $indexImage = [math]::floor($arrayImages.Values.indexof($image)/$arrayImages[0].Count)
 
                         $arrayImages[$indexImage].Total = $arrayImages[$indexImage].Total + $rIds[$j].Total
+                        $arrayImages[$indexImage].Slides += $i
 
                         if ($arrayImages[$indexImage].Ratio -gt $rIds[$j].Ratio) {
                             $arrayImages[$indexImage].Ratio = $rIds[$j].Ratio
@@ -115,7 +116,7 @@ function FindUsedImages {
                         }
                     }
                     else {
-                        $arrayImages += @{"Total"= $rIds[$j].Total; "Name" = $image; "Ratio" = $rIds[$j].Ratio; "UtilVertical" = $rIds[$j].UtilVertical; "UtilHorizontal" = $rIds[$j].UtilHorizontal}
+                        $arrayImages += @{"Total"= $rIds[$j].Total; "Name" = $image;"Ratio" = $rIds[$j].Ratio; "UtilVertical" = $rIds[$j].UtilVertical; "UtilHorizontal" = $rIds[$j].UtilHorizontal; "Slides" = @($i)}
                     }
                 }
 
@@ -150,11 +151,11 @@ function EvalImages {
 
         # TODO: Générer les avertissements, exemple ci-dessous
 
-        if (($entry.length / 1MB) -gt 1) {
+        #if (($entry.length / 1MB) -gt 1) {
             $image.FileSize = $entry.Length
             $image.FileType = "Image"
             $image.Message = "Cette image à un poid supérieur à 1MB"
-        }
+        #}
     }
 
     $zipArchive.Dispose()
