@@ -11,6 +11,37 @@ WIP
 
 #>
 
+Class PPTXFile
+{
+    [String]$name
+    [int[]]$slides
+    [int]$filesize
+    [int]$total
+    [String]$warning
+}
+
+Class PPTXImage : PPTXFile
+{
+    [double]$ratio
+    [int]$utilisationV
+    [int]$utilisationH
+
+    PPTXImage ([string]$name)
+    {
+        $this.name = $name
+    }
+}
+
+Class PPTXVideo : PPTXFile
+{
+    [double]$length
+
+    PPTXVideo ([string]$name)
+    {
+        $this.name = $name
+    }
+}
+
 function GetEntryAsXML {
     param([System.IO.Compression.ZipArchiveEntry]$entry)
 
@@ -25,7 +56,7 @@ function GetEntryAsXML {
 function FindUsedImages {
     param([string]$filename)
 
-    $arrayImages = @()
+    [PPTXFile[]]$arrayImages = @()
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zipArchive = [System.IO.Compression.ZipFile]::OpenRead($filename)
@@ -40,7 +71,7 @@ function FindUsedImages {
 
         if ($entry) {
             $rIds = $null
-            $rIds = @()
+            [PPTXFile[]]$rIds = @()
 
             $slideContent = GetEntryAsXML $entry
 
@@ -63,24 +94,30 @@ function FindUsedImages {
                 $utilHorizontal = 100000 - ([int]$pic.blipfill.srcRect.l + [int]$pic.blipfill.srcRect.r)
 
 
-                if (($rIds.Count -gt 0) -and ($rIds.Values.Contains($rId))) {
-                    $index = [math]::floor($rIds.Values.indexof($image)/$rIds[0].Count)
+                if (($rIds.Count -gt 0) -and ($rIds.Name -contains $rId)) {
+                    $index = $rIds.name.indexof($rId)
                     $rIds[$index].Total++
 
                     if ($rIds[$index].Ratio -gt $ratio) {
                         $rIds[$index].Ratio = $ratio
                     }
 
-                    if ($rIds[$index].UtilVertical -lt $utilVertical) {
-                        $rIds[$index].UtilVertical = $utilVertical
+                    if ($rIds[$index].UtilisationV -lt $utilVertical) {
+                        $rIds[$index].UtilisationV = $utilVertical
                     }
 
-                    if ($rIds[$index].UtilHorizontal -lt $utilHorizontal) {
-                        $rIds[$index].UtilHorizontal = $utilHorizontal
+                    if ($rIds[$index].UtilisationH -lt $utilHorizontal) {
+                        $rIds[$index].UtilisationH = $utilHorizontal
                     }
                 }
                 else {
-                    $rIds += @{"rId" = $rId;"Total" = 1; "Ratio" = $ratio; "UtilVertical" = $utilVertical; "UtilHorizontal" = $utilHorizontal}
+                    $newItem = [PPTXImage]::new($rId)
+                    $newItem.ratio = $ratio
+                    $newItem.utilisationV = $utilVertical
+                    $newItem.utilisationH = $utilHorizontal
+                    $newItem.total = 1
+
+                    $rIds += $newItem
                 }
             }
 
@@ -95,28 +132,34 @@ function FindUsedImages {
                 #Va chercher, pour chaque rId, le nom de l'image associée, puis met à jour les informations (ou ajoute l'entrée si non-existant)
                 for($j=0;$j -lt $rIds.Length;$j++) {
                     $image = $relsContent.Relationships.Relationship `
-                    | Where-Object {($_.Id -eq $rIds[$j].rId) -and ($_.Type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image")} `
+                    | Where-Object {($_.Id -eq $rIds[$j].name) -and ($_.Type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image")} `
                     | Foreach-Object {$_.Target.Substring(9)}
-                    if (($arrayImages.Count -gt 0) -and ($arrayImages.Values.Contains($image))) {
-                        $indexImage = [math]::floor($arrayImages.Values.indexof($image)/$arrayImages[0].Count)
+                    if (($arrayImages.Count -gt 0) -and ($arrayImages.Name -contains $image)) {
+                        $indexImage = $arrayImages.name.indexof($image)
 
                         $arrayImages[$indexImage].Total = $arrayImages[$indexImage].Total + $rIds[$j].Total
                         $arrayImages[$indexImage].Slides += $i
 
-                        if ($arrayImages[$indexImage].Ratio -gt $rIds[$j].Ratio) {
+                        if ($arrayImages[$indexImage].Ratio -gt $rIds[$j].ratio) {
                             $arrayImages[$indexImage].Ratio = $rIds[$j].Ratio
                         }
 
-                        if ($arrayImages[$indexImage].UtilVertical -lt $rIds[$j].UtilVertical) {
-                            $arrayImages[$indexImage].UtilVertical = $rIds[$j].UtilVertical
+                        if ($arrayImages[$indexImage].utilisationV -lt $rIds[$j].utilisationV) {
+                            $arrayImages[$indexImage].utilisationV = $rIds[$j].utilisationV
                         }
 
-                        if ($arrayImages[$indexImage].UtilHorizontal -lt $rIds[$j].UtilHorizontal) {
-                            $arrayImages[$indexImage].UtilHorizontal = $rIds[$j].UtilHorizontal
+                        if ($arrayImages[$indexImage].utilisationH -lt $rIds[$j].utilisationH) {
+                            $arrayImages[$indexImage].utilisationH = $rIds[$j].utilisationH
                         }
                     }
                     else {
-                        $arrayImages += @{"Total"= $rIds[$j].Total; "Name" = $image;"Ratio" = $rIds[$j].Ratio; "UtilVertical" = $rIds[$j].UtilVertical; "UtilHorizontal" = $rIds[$j].UtilHorizontal; "Slides" = @($i)}
+                        $newItem = [PPTXImage]::new($image)
+                        $newItem.ratio = $rIds[$j].ratio
+                        $newItem.utilisationV = $rIds[$j].utilisationV
+                        $newItem.utilisationH = $rIds[$j].utilisationH
+                        $newItem.slides = @($i)
+                        $newItem.total = $rIds[$j].total
+                        $arrayImages += $newItem
                     }
                 }
 
@@ -139,27 +182,26 @@ function FindUsedImages {
     return $arrayImages
 }
 
-function EvalImages {
-    param([string]$filename, [hashtable[]]$hashImages)
+function GenerateWarnings {
+    param([string]$filename, [PPTXFile[]]$fileArray)
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zipArchive = [System.IO.Compression.ZipFile]::OpenRead($filename)
 
-    foreach ($image in $hashImages) {
-        $imgPath = "ppt/media/" + $image.Name
-        $entry = $zipArchive.GetEntry($imgPath)
+    foreach ($file in $fileArray) {
+        $filePath = "ppt/media/" + $file.Name
+        $entry = $zipArchive.GetEntry($filePath)
 
         # TODO: Générer les avertissements, exemple ci-dessous
 
         #if (($entry.length / 1MB) -gt 1) {
-            $image.FileSize = $entry.Length
-            $image.FileType = "Image"
-            $image.Message = "Cette image à un poid supérieur à 1MB"
+            $file.FileSize = $entry.Length
+            $file.warning = "Cette image à un poid supérieur à 1MB"
         #}
     }
 
     $zipArchive.Dispose()
-    return $hashImages
+    return $fileArray
 }
 
 #Ouvre une fenêtre pour la sélection du fichier PowerPoint
@@ -173,8 +215,8 @@ if (($result -eq "OK") -and $openFileDialog.CheckFileExists) {
 
     $images = FindUsedImages -filename $openFileDialog.FileName
 
-    $images = EvalImages -filename $openFileDialog.FileName -hashImages $images
+    $images = GenerateWarnings -filename $openFileDialog.FileName -fileArray $images
 
     #Affichage temporaire
-    $images | Where-Object {$_.Message}
+    $images | Where-Object {$_.warning}
 }
