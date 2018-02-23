@@ -13,11 +13,11 @@ WIP
 
 Class PPTXFile
 {
-    [String]$name
+    [string]$name
     [int[]]$slides
     [int]$filesize
     [int]$total
-    [String]$warning
+    [string]$warning
 }
 
 Class PPTXImage : PPTXFile
@@ -30,6 +30,15 @@ Class PPTXImage : PPTXFile
     {
         $this.name = $name
     }
+
+    [bool]CreateWarning()
+    {
+        if ($this.filesize -gt 1KB) {
+            $this.warning = "Cette image à un poid supérieur à 1KB"
+            return $true;
+        }
+        return $false;
+    }
 }
 
 Class PPTXVideo : PPTXFile
@@ -39,6 +48,15 @@ Class PPTXVideo : PPTXFile
     PPTXVideo ([string]$name)
     {
         $this.name = $name
+    }
+
+    [bool]CreateWarning()
+    {
+        if ($this.filesize -gt 10KB) {
+            $this.warning = "Cette vidéo à un poid supérieur à 10KB"
+            return $true;
+        }
+        return $false;
     }
 }
 
@@ -119,6 +137,21 @@ function FindUsedImages {
 
                     $rIds += $newItem
                 }
+
+                #Si l'image est un preview de vidéo, on ajoute la vidéo dans la liste
+                if ($pic.nvpicpr.nvpr.videofile.link -ne $null) {
+                    $rId = $pic.nvpicpr.nvpr.videofile.link
+                    if (($rIds.Count -gt 0) -and ($rIds.Name -contains $rId)) {
+                        $index = $rIds.name.indexof($rId)
+                        $rIds[$index].Total++
+                    }
+                    else {
+                        $newItem = [PPTXVideo]::new($rId)
+                        $newItem.total = 1
+
+                        $rIds += $newItem
+                    }
+                }
             }
 
             #Va chercher la bonne référence dans le fichier xml.rels 
@@ -131,35 +164,54 @@ function FindUsedImages {
 
                 #Va chercher, pour chaque rId, le nom de l'image associée, puis met à jour les informations (ou ajoute l'entrée si non-existant)
                 for($j=0;$j -lt $rIds.Length;$j++) {
-                    $image = $relsContent.Relationships.Relationship `
-                    | Where-Object {($_.Id -eq $rIds[$j].name) -and ($_.Type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image")} `
-                    | Foreach-Object {$_.Target.Substring(9)}
-                    if (($arrayImages.Count -gt 0) -and ($arrayImages.Name -contains $image)) {
-                        $indexImage = $arrayImages.name.indexof($image)
+                    $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
+                    $image = $xmlNode.Target.Substring(9)
 
-                        $arrayImages[$indexImage].Total = $arrayImages[$indexImage].Total + $rIds[$j].Total
-                        $arrayImages[$indexImage].Slides += $i
+                    #Images
+                    if ($xmlNode.Type -eq "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image") {
+                        if (($arrayImages.Count -gt 0) -and ($arrayImages.Name -contains $image)) {
+                            $indexImage = $arrayImages.name.indexof($image)
 
-                        if ($arrayImages[$indexImage].Ratio -gt $rIds[$j].ratio) {
-                            $arrayImages[$indexImage].Ratio = $rIds[$j].Ratio
+                            $arrayImages[$indexImage].Total = $arrayImages[$indexImage].Total + $rIds[$j].Total
+                            $arrayImages[$indexImage].Slides += $i
+
+                            if ($arrayImages[$indexImage].Ratio -gt $rIds[$j].ratio) {
+                                $arrayImages[$indexImage].Ratio = $rIds[$j].Ratio
+                            }
+
+                            if ($arrayImages[$indexImage].utilisationV -lt $rIds[$j].utilisationV) {
+                                $arrayImages[$indexImage].utilisationV = $rIds[$j].utilisationV
+                            }
+
+                            if ($arrayImages[$indexImage].utilisationH -lt $rIds[$j].utilisationH) {
+                                $arrayImages[$indexImage].utilisationH = $rIds[$j].utilisationH
+                            }
                         }
-
-                        if ($arrayImages[$indexImage].utilisationV -lt $rIds[$j].utilisationV) {
-                            $arrayImages[$indexImage].utilisationV = $rIds[$j].utilisationV
-                        }
-
-                        if ($arrayImages[$indexImage].utilisationH -lt $rIds[$j].utilisationH) {
-                            $arrayImages[$indexImage].utilisationH = $rIds[$j].utilisationH
+                        else {
+                            $newItem = [PPTXImage]::new($image)
+                            $newItem.ratio = $rIds[$j].ratio
+                            $newItem.utilisationV = $rIds[$j].utilisationV
+                            $newItem.utilisationH = $rIds[$j].utilisationH
+                            $newItem.slides = @($i)
+                            $newItem.total = $rIds[$j].total
+                            $arrayImages += $newItem
                         }
                     }
-                    else {
-                        $newItem = [PPTXImage]::new($image)
-                        $newItem.ratio = $rIds[$j].ratio
-                        $newItem.utilisationV = $rIds[$j].utilisationV
-                        $newItem.utilisationH = $rIds[$j].utilisationH
-                        $newItem.slides = @($i)
-                        $newItem.total = $rIds[$j].total
-                        $arrayImages += $newItem
+
+                    #Videos
+                    if ($xmlNode.Type -eq "http://schemas.openxmlformats.org/officeDocument/2006/relationships/video") {
+                        if (($arrayImages.Count -gt 0) -and ($arrayImages.Name -contains $image)) {
+                            $indexImage = $arrayImages.name.indexof($image)
+
+                            $arrayImages[$indexImage].Total = $arrayImages[$indexImage].Total + $rIds[$j].Total
+                            $arrayImages[$indexImage].Slides += $i
+                        }
+                        else {
+                            $newItem = [PPTXVideo]::new($image)
+                            $newItem.slides = @($i)
+                            $newItem.total = $rIds[$j].total
+                            $arrayImages += $newItem
+                        }
                     }
                 }
 
@@ -191,13 +243,8 @@ function GenerateWarnings {
     foreach ($file in $fileArray) {
         $filePath = "ppt/media/" + $file.Name
         $entry = $zipArchive.GetEntry($filePath)
-
-        # TODO: Générer les avertissements, exemple ci-dessous
-
-        #if (($entry.length / 1MB) -gt 1) {
-            $file.FileSize = $entry.Length
-            $file.warning = "Cette image à un poid supérieur à 1MB"
-        #}
+        $file.filesize = $entry.Length
+        $hasWarning = $file.CreateWarning()
     }
 
     $zipArchive.Dispose()
