@@ -60,6 +60,63 @@ Class PPTXVideo : PPTXFile
     }
 }
 
+Class PPTXExcel : PPTXFile
+{
+    [PPTXImage[]]$images
+
+    PPTXExcel ([string]$name)
+    {
+        $this.name = $name
+    }
+
+    [bool]CreateWarning()
+    {
+        if ($this.filesize -gt 1KB) {
+            $this.warning = "Ce fichier Excel à un poid supérieur à 1KB"
+            return $true;
+        }
+        return $false;
+    }
+}
+
+Class PPTXPowerPoint : PPTXFile
+{
+    [PPTXImage[]]$images
+
+    PPTXPowerPoint ([string]$name)
+    {
+        $this.name = $name
+    }
+
+    [bool]CreateWarning()
+    {
+        if ($this.filesize -gt 2KB) {
+            $this.warning = "Ce fichier PowerPoint à un poid supérieur à 2KB"
+            return $true;
+        }
+        return $false;
+    }
+}
+
+Class PPTXWord : PPTXFile
+{
+    [PPTXImage[]]$images
+
+    PPTXWord ([string]$name)
+    {
+        $this.name = $name
+    }
+
+    [bool]CreateWarning()
+    {
+        if ($this.filesize -gt 3KB) {
+            $this.warning = "Ce fichier Word à un poid supérieur à 3KB"
+            return $true;
+        }
+        return $false;
+    }
+}
+
 function GetEntryAsXML {
     param([System.IO.Compression.ZipArchiveEntry]$entry)
 
@@ -241,7 +298,12 @@ function GenerateWarnings {
     $zipArchive = [System.IO.Compression.ZipFile]::OpenRead($filename)
 
     foreach ($file in $fileArray) {
-        $filePath = "ppt/media/" + $file.Name
+        if ($file.GetType().Name -eq "PPTXImage") {
+            $filePath = "ppt/media/" + $file.Name
+        }
+        if ($file.GetType().Name -eq "PPTXVideo") {
+            $filePath = "ppt/media/" + $file.Name
+        }
         $entry = $zipArchive.GetEntry($filePath)
         $file.filesize = $entry.Length
         $hasWarning = $file.CreateWarning()
