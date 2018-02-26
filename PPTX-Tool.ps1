@@ -44,8 +44,9 @@ Class PPTXImage : PPTXFile
         $this.name = $name
     }
 
-    [bool]CreateWarning()
+    [bool]CreateWarning([System.IO.Compression.ZipArchiveEntry]$entry)
     {
+        $this.filesize = $entry.Length
         if ($this.filesize -gt 1KB) {
             $this.warning = "Cette image à un poid supérieur à 1KB"
             return $true;
@@ -63,8 +64,9 @@ Class PPTXVideo : PPTXFile
         $this.name = $name
     }
 
-    [bool]CreateWarning()
+    [bool]CreateWarning([System.IO.Compression.ZipArchiveEntry]$entry)
     {
+        $this.filesize = $entry.Length
         if ($this.filesize -gt 10KB) {
             $this.warning = "Cette vidéo à un poid supérieur à 10KB"
             return $true;
@@ -75,15 +77,21 @@ Class PPTXVideo : PPTXFile
 
 Class PPTXExcel : PPTXFile
 {
-    [PPTXImage[]]$images
+    [PPTXFile[]]$arrayFiles
 
-    PPTXExcel ([string]$name)
+    PPTXExcel ([string]$name, [bool]$analyseNow)
     {
         $this.name = $name
+        if ($analyseNow) {
+            #$this.zipArchive = [System.IO.Compression.ZipFile]::OpenRead($this.name)
+            #$this.AnalyzeFile()
+            #$this.zipArchive.Dispose()
+        }
     }
 
-    [bool]CreateWarning()
+    [bool]CreateWarning([System.IO.Compression.ZipArchiveEntry]$entry)
     {
+        $this.filesize = $entry.Length
         if ($this.filesize -gt 1KB) {
             $this.warning = "Ce fichier Excel à un poid supérieur à 1KB"
             return $true;
@@ -95,25 +103,26 @@ Class PPTXExcel : PPTXFile
 Class PPTXPowerPoint : PPTXFile
 {
     [PPTXFile[]]$arrayImages
+    hidden [System.IO.Compression.ZipArchive]$zipArchive
 
-
-    PPTXPowerPoint ([string]$name)
+    PPTXPowerPoint ([string]$name, [bool]$analyseNow)
     {
         $this.name = $name
-        $this.AnalyzeFile()
+        if ($analyseNow) {
+            $this.zipArchive = [System.IO.Compression.ZipFile]::OpenRead($this.name)
+            $this.AnalyzeFile()
+            $this.zipArchive.Dispose()
+        }
     }
 
     hidden [void] AnalyzeFile() {
- 
-        $zipArchive = [System.IO.Compression.ZipFile]::OpenRead($this.name)
-
         #On incrémente et vérifie si la slide existe (pptx commencent à 1)
         $i = 1
         $slideExist = $true;
         while($slideExist -eq $true) {
         
             $slidePath = "ppt/slides/slide" + $i + ".xml"
-            $entry = $zipArchive.GetEntry($slidePath)
+            $entry = $this.zipArchive.GetEntry($slidePath)
 
             if ($entry) {
                 $rIds = $null
@@ -182,9 +191,42 @@ Class PPTXPowerPoint : PPTXFile
                     }
                 }
 
+                #Word, Excel, PowerPoint
+                foreach ($graphic in $slideContent.sld.csld.sptree.graphicframe) {
+                    #rID
+                    $rId = $graphic.graphic.graphicdata.alternatecontent.fallback.oleobj.id
+
+                    if ($rId -ne $null) {
+                        if (($rIds.Count -gt 0) -and ($rIds.Name -contains $rId)) {
+                            $index = $rIds.name.indexof($rId)
+                            $rIds[$index].Total++
+                        }
+                        else {
+                            $itemtype = $graphic.graphic.graphicData.AlternateContent.Fallback.oleObj.progId.Substring(0,4)
+
+                            if ($itemType -eq "Word") {
+                                $newItem = [PPTXWord]::new($rId, $false)
+                            }
+                            elseif ($itemType -eq "Exce") {
+                                $newItem = [PPTXExcel]::new($rId, $false)
+                            }
+                            elseif ($itemType -eq "Powe") {
+                                $newItem = [PPTXPowerPoint]::new($rId, $false)
+                            }
+                            else {
+                                $newItem = [PPTXFile]::new()
+                                $newItem.name = $rId
+                            }
+                            
+                            $newItem.total = 1
+                            $rIds += $newItem
+                        }
+                    }
+                }
+
                 #Référence dans le fichier xml.rels 
                 $relsPath = "ppt/slides/_rels/slide" + $i + ".xml.rels"
-                $entry = $zipArchive.GetEntry($relsPath)
+                $entry = $this.zipArchive.GetEntry($relsPath)
 
                 if ($entry) {
 
@@ -193,10 +235,11 @@ Class PPTXPowerPoint : PPTXFile
                     #Pour chaque rId: le nom du fichier associée, puis met à jour les informations ou créé l'entrée
                     for($j=0;$j -lt $rIds.Length;$j++) {
                         $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
-                        $image = $xmlNode.Target.Substring(9)
+                        
 
                         #Images
                         if ($xmlNode.Type -eq "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image") {
+                            $image = $xmlNode.Target.Substring(9)
                             if (($this.arrayImages.Count -gt 0) -and ($this.arrayImages.Name -contains $image)) {
                                 $indexImage = $this.arrayImages.name.indexof($image)
 
@@ -228,6 +271,7 @@ Class PPTXPowerPoint : PPTXFile
 
                         #Videos
                         elseif ($xmlNode.Type -eq "http://schemas.openxmlformats.org/officeDocument/2006/relationships/video") {
+                            $image = $xmlNode.Target.Substring(9)
                             if (($this.arrayImages.Count -gt 0) -and ($this.arrayImages.Name -contains $image)) {
                                 $indexImage = $this.arrayImages.name.indexof($image)
 
@@ -236,6 +280,38 @@ Class PPTXPowerPoint : PPTXFile
                             }
                             else {
                                 $newItem = [PPTXVideo]::new($image)
+                                $newItem.slides = @($i)
+                                $newItem.total = $rIds[$j].total
+                                $this.arrayImages += $newItem
+                            }
+                        }
+
+                        #Word, Excel, PowerPoint
+                        elseif ($xmlNode.Type -eq "http://schemas.openxmlformats.org/officeDocument/2006/relationships/package") {
+                            $image = $xmlNode.Target.Substring(14)
+                            if (($this.arrayImages.Count -gt 0) -and ($this.arrayImages.Name -contains $image)) {
+                                $indexImage = $this.arrayImages.name.indexof($image)
+
+                                $this.arrayImages[$indexImage].Total = $this.arrayImages[$indexImage].Total + $rIds[$j].Total
+                                $this.arrayImages[$indexImage].Slides += $i
+                            }
+                            else {
+                                $itemType = $image.Substring($image.get_Length()-4)
+
+                                if ($itemType -eq "pptx") {
+                                    $newItem = [PPTXPowerPoint]::new($image, $false)
+                                }
+                                elseif ($itemType -eq "xlsx") {
+                                    $newItem = [PPTXExcel]::new($image, $false)
+                                }
+                                elseif ($itemType -eq "docx") {
+                                    $newItem = [PPTXWord]::new($image, $false)
+                                }
+                                else {
+                                    $newItem = [PPTXFile]::new()
+                                    $newItem.name = $image
+                                }
+                                
                                 $newItem.slides = @($i)
                                 $newItem.total = $rIds[$j].total
                                 $this.arrayImages += $newItem
@@ -260,24 +336,27 @@ Class PPTXPowerPoint : PPTXFile
         foreach ($file in $this.arrayImages) {
             $filePath = ""
 
-            if ($file.GetType().Name -eq "PPTXImage") {
+            if ($file.GetType().Name -eq "PPTXImage" -or $file.GetType().Name -eq "PPTXVideo") {
                 $filePath = "ppt/media/" + $file.Name
             }
 
-            elseif ($file.GetType().Name -eq "PPTXVideo") {
-                $filePath = "ppt/media/" + $file.Name
+            elseif ($file.GetType().Name -eq "PPTXPowerPoint" -or $file.GetType().Name -eq "PPTXExcel" -or $file.GetType().Name -eq "PPTXWord") {
+                $filePath = "ppt/embeddings/" + $file.Name
             }
 
-            $entry = $zipArchive.GetEntry($filePath)
-            $file.filesize = $entry.Length
-            $hasWarning = $file.CreateWarning()
+            $entry = $this.zipArchive.GetEntry($filePath)
+            $hasWarning = $file.CreateWarning($entry)
         }
-
-        $zipArchive.Dispose()
     }
 
-    [bool]CreateWarning()
+    [bool]CreateWarning([System.IO.Compression.ZipArchiveEntry]$entry)
     {
+        #TODO: Retirer les commentaires pour tester la récursivité
+        #$this.zipArchive = [System.IO.Compression.ZipFile]::OpenRead($entry)
+        #$this.AnalyzeFile()
+        #$this.zipArchive.Dispose()
+
+        $this.filesize = $entry.Length
         if ($this.filesize -gt 2KB) {
             $this.warning = "Ce fichier PowerPoint à un poid supérieur à 2KB"
             return $true;
@@ -288,15 +367,21 @@ Class PPTXPowerPoint : PPTXFile
 
 Class PPTXWord : PPTXFile
 {
-    [PPTXImage[]]$images
+    [PPTXFile[]]$arrayFiles
 
-    PPTXWord ([string]$name)
+    PPTXWord ([string]$name, [bool]$analyseNow)
     {
         $this.name = $name
+        if ($analyseNow) {
+            #$this.zipArchive = [System.IO.Compression.ZipFile]::OpenRead($this.name)
+            #$this.AnalyzeFile()
+            #$this.zipArchive.Dispose()
+        }
     }
 
-    [bool]CreateWarning()
+    [bool]CreateWarning([System.IO.Compression.ZipArchiveEntry]$entry)
     {
+        $this.filesize = $entry.Length
         if ($this.filesize -gt 3KB) {
             $this.warning = "Ce fichier Word à un poid supérieur à 3KB"
             return $true;
@@ -314,7 +399,7 @@ $result = $openFileDialog.ShowDialog()
 
 if (($result -eq "OK") -and $openFileDialog.CheckFileExists) {
 
-    [PPTXPowerPoint]$analyzedFile = [PPTXPowerPoint]::new($openFileDialog.FileName)
+    [PPTXPowerPoint]$analyzedFile = [PPTXPowerPoint]::new($openFileDialog.FileName, $true)
 
     #Affichage temporaire
     $analyzedFile.arrayImages | Where-Object {$_.warning}
