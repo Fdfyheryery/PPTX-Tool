@@ -24,6 +24,24 @@ function GetEntryAsXML {
     return $entryXML
 }
 
+#Bypassing a class limitation
+function CallAnalyzeFromEntry {
+    param([PPTXFile]$file, [System.IO.Compression.ZipArchiveEntry]$entry)
+
+    $file.zipArchive = [System.IO.Compression.ZipArchive]::New($entry.Open())
+    $file.AnalyzeFile()
+    $file.zipArchive.Dispose()
+}
+
+#Bypassing a class limitation
+function CallAnalyzeFromName {
+    param([PPTXFile]$file, [string]$name)
+
+    $file.zipArchive = [System.IO.Compression.ZipFile]::OpenRead($name)
+    $file.AnalyzeFile()
+    $file.zipArchive.Dispose()
+}
+
 Class PPTXFile
 {
     [string]$name
@@ -44,7 +62,7 @@ Class PPTXImage : PPTXFile
         $this.name = $name
     }
 
-    [bool]CreateWarning([System.IO.Compression.ZipArchiveEntry]$entry)
+    [bool]CreateWarning($entry)
     {
         $this.filesize = $entry.Length
         if ($this.filesize -gt 1KB) {
@@ -64,7 +82,7 @@ Class PPTXVideo : PPTXFile
         $this.name = $name
     }
 
-    [bool]CreateWarning([System.IO.Compression.ZipArchiveEntry]$entry)
+    [bool]CreateWarning($entry)
     {
         $this.filesize = $entry.Length
         if ($this.filesize -gt 10KB) {
@@ -89,7 +107,7 @@ Class PPTXExcel : PPTXFile
         }
     }
 
-    [bool]CreateWarning([System.IO.Compression.ZipArchiveEntry]$entry)
+    [bool]CreateWarning($entry)
     {
         $this.filesize = $entry.Length
         if ($this.filesize -gt 1KB) {
@@ -103,15 +121,13 @@ Class PPTXExcel : PPTXFile
 Class PPTXPowerPoint : PPTXFile
 {
     [PPTXFile[]]$arrayImages
-    hidden [System.IO.Compression.ZipArchive]$zipArchive
+    hidden $zipArchive
 
     PPTXPowerPoint ([string]$name, [bool]$analyseNow)
     {
         $this.name = $name
         if ($analyseNow) {
-            $this.zipArchive = [System.IO.Compression.ZipFile]::OpenRead($this.name)
-            $this.AnalyzeFile()
-            $this.zipArchive.Dispose()
+            CallAnalyzeFromName $this $name
         }
     }
 
@@ -349,12 +365,11 @@ Class PPTXPowerPoint : PPTXFile
         }
     }
 
-    [bool]CreateWarning([System.IO.Compression.ZipArchiveEntry]$entry)
+    [bool]CreateWarning($entry)
     {
         #TODO: Retirer les commentaires pour tester la récursivité
-        #$this.zipArchive = [System.IO.Compression.ZipFile]::OpenRead($entry)
-        #$this.AnalyzeFile()
-        #$this.zipArchive.Dispose()
+        
+        CallAnalyzeFromEntry $this $entry
 
         $this.filesize = $entry.Length
         if ($this.filesize -gt 2KB) {
@@ -379,7 +394,7 @@ Class PPTXWord : PPTXFile
         }
     }
 
-    [bool]CreateWarning([System.IO.Compression.ZipArchiveEntry]$entry)
+    [bool]CreateWarning($entry)
     {
         $this.filesize = $entry.Length
         if ($this.filesize -gt 3KB) {
