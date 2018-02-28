@@ -42,6 +42,182 @@ function CallAnalyzeFromName {
     $file.zipArchive.Dispose()
 }
 
+function GetImageFromXML {
+    param([PPTXFile[]]$rIds, $pic)
+
+    #rID
+    $rId = $pic.blipfill.blip.embed
+
+    #Ratio
+    if ($pic.sppr.xfrm.ext.cx -lt $pic.sppr.xfrm.ext.cy) {
+        $ratio = $pic.sppr.xfrm.ext.cx / 914400
+                    
+    }
+    else {
+        $ratio = $pic.sppr.xfrm.ext.cy / 914400
+    }
+
+    #Utilisation (Rognage) (10000 = 10.000%)
+    $utilVertical = 100000 - ([int]$pic.blipfill.srcRect.t + [int]$pic.blipfill.srcRect.b)
+    $utilHorizontal = 100000 - ([int]$pic.blipfill.srcRect.l + [int]$pic.blipfill.srcRect.r)
+
+
+    if (($rIds.Count -gt 0) -and ($rIds.Name -contains $rId)) {
+        $index = $rIds.name.indexof($rId)
+        $rIds[$index].Total++
+
+        if ($rIds[$index].Ratio -gt $ratio) {
+            $rIds[$index].Ratio = $ratio
+        }
+
+        if ($rIds[$index].UtilisationV -lt $utilVertical) {
+            $rIds[$index].UtilisationV = $utilVertical
+        }
+
+        if ($rIds[$index].UtilisationH -lt $utilHorizontal) {
+            $rIds[$index].UtilisationH = $utilHorizontal
+        }
+    }
+    else {
+        $newItem = [PPTXImage]::new($rId)
+        $newItem.ratio = $ratio
+        $newItem.utilisationV = $utilVertical
+        $newItem.utilisationH = $utilHorizontal
+        $newItem.total = 1
+
+        $rIds += $newItem
+    }
+
+    #Si l'image est un preview de vidéo, on ajoute la vidéo dans la liste
+    if ($pic.nvpicpr.nvpr.videofile.link -ne $null) {
+        $rId = $pic.nvpicpr.nvpr.videofile.link
+        if (($rIds.Count -gt 0) -and ($rIds.Name -contains $rId)) {
+            $index = $rIds.name.indexof($rId)
+            $rIds[$index].Total++
+        }
+        else {
+            $newItem = [PPTXVideo]::new($rId)
+            $newItem.total = 1
+
+            $rIds += $newItem
+        }
+    }
+    return $rIDs
+}
+
+function GetRelsFromXML {
+    param([PPTXFile]$file, [PPTXFile]$RIdItem, $xml)
+
+    $image = $xmlNode.Target.split("/")[-1]
+
+    #Images
+    if ($xmlNode.Type -eq "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image") {
+        
+        if (($file.arrayImages.Count -gt 0) -and ($file.arrayImages.Name -contains $image)) {
+            $indexImage = $file.arrayImages.name.indexof($image)
+
+            $file.arrayImages[$indexImage].Total = $file.arrayImages[$indexImage].Total + $RIdItem.Total
+            $file.arrayImages[$indexImage].Slides += $i
+
+            if ($file.arrayImages[$indexImage].Ratio -gt $RIdItem.ratio) {
+                $file.arrayImages[$indexImage].Ratio = $RIdItem.Ratio
+            }
+
+            if ($file.arrayImages[$indexImage].utilisationV -lt $RIdItem.utilisationV) {
+                $file.arrayImages[$indexImage].utilisationV = $RIdItem.utilisationV
+            }
+
+            if ($file.arrayImages[$indexImage].utilisationH -lt $RIdItem.utilisationH) {
+                $file.arrayImages[$indexImage].utilisationH = $RIdItem.utilisationH
+            }
+        }
+        else {
+            $newItem = [PPTXImage]::new($image)
+            $newItem.ratio = $RIdItem.ratio
+            $newItem.utilisationV = $RIdItem.utilisationV
+            $newItem.utilisationH = $RIdItem.utilisationH
+            $newItem.slides = @($i)
+            $newItem.total = $RIdItem.total
+            $file.arrayImages += $newItem
+        }
+    }
+
+    #Videos
+    elseif ($xmlNode.Type -eq "http://schemas.openxmlformats.org/officeDocument/2006/relationships/video") {
+        if (($file.arrayImages.Count -gt 0) -and ($file.arrayImages.Name -contains $image)) {
+            $indexImage = $file.arrayImages.name.indexof($image)
+
+            $file.arrayImages[$indexImage].Total = $file.arrayImages[$indexImage].Total + $RIdItem.Total
+            $file.arrayImages[$indexImage].Slides += $i
+        }
+        else {
+            $newItem = [PPTXVideo]::new($image)
+            $newItem.slides = @($i)
+            $newItem.total = $RIdItem.total
+            $file.arrayImages += $newItem
+        }
+    }
+
+    #Word, Excel, PowerPoint
+    elseif ($xmlNode.Type -eq "http://schemas.openxmlformats.org/officeDocument/2006/relationships/package") {
+        if (($file.arrayImages.Count -gt 0) -and ($this.arrayImages.Name -contains $image)) {
+            $indexImage = $this.arrayImages.name.indexof($image)
+
+            $file.arrayImages[$indexImage].Total = $file.arrayImages[$indexImage].Total + $RIdItem.Total
+            $file.arrayImages[$indexImage].Slides += $i
+        }
+        else {
+            $itemType = $image.Substring($image.get_Length()-4)
+
+            if ($itemType -eq "pptx") {
+                $newItem = [PPTXPowerPoint]::new($image, $false)
+            }
+            elseif ($itemType -eq "xlsx") {
+                $newItem = [PPTXExcel]::new($image, $false)
+            }
+            elseif ($itemType -eq "docx") {
+                $newItem = [PPTXWord]::new($image, $false)
+            }
+            else {
+                $newItem = [PPTXFile]::new()
+                $newItem.name = $image
+            }
+                                
+            $newItem.slides = @($i)
+            $newItem.total = $RIdItem.total
+            $file.arrayImages += $newItem
+        }
+    }
+}
+
+function CreateFileWarnings {
+    param([PPTXFile]$pptxfile)
+
+    foreach ($file in $pptxfile.arrayImages) {
+        $filePath = ""
+        $startPath = ""
+
+        if ($pptxfile.GetType().Name -eq "PPTXPowerPoint") {
+            $startPath = "ppt/"
+        }
+
+        elseif ($pptxfile.GetType().Name -eq "PPTXWord") {
+            $startPath = "word/"
+        }
+
+        if ($file.GetType().Name -eq "PPTXImage" -or $file.GetType().Name -eq "PPTXVideo") {
+            $filePath = $startPath + "media/" + $file.Name
+        }
+
+        elseif ($file.GetType().Name -eq "PPTXPowerPoint" -or $file.GetType().Name -eq "PPTXExcel" -or $file.GetType().Name -eq "PPTXWord") {
+            $filePath = $startPath + "embeddings/" + $file.Name
+        }
+
+        $entry = $pptxfile.zipArchive.GetEntry($filePath)
+        $hasWarning = $file.CreateWarning($entry)
+    }
+}
+
 Class PPTXFile
 {
     [string]$name
@@ -149,63 +325,7 @@ Class PPTXPowerPoint : PPTXFile
 
                 #Image et Vidéo
                 foreach ($pic in $slideContent.sld.csld.sptree.pic) {
-                    #rID
-                    $rId = $pic.blipfill.blip.embed
-
-                    #Ratio (Image source : Image PPTX)
-                    if ($pic.sppr.xfrm.ext.cx -lt $pic.sppr.xfrm.ext.cy) {
-                        $ratio = $pic.sppr.xfrm.ext.cx / 914400
-                    
-                    }
-                    else {
-                        $ratio = $pic.sppr.xfrm.ext.cy / 914400
-                    }
-
-                    #Utilisation (Rognage) (10000 = 10.000%)
-                    $utilVertical = 100000 - ([int]$pic.blipfill.srcRect.t + [int]$pic.blipfill.srcRect.b)
-                    $utilHorizontal = 100000 - ([int]$pic.blipfill.srcRect.l + [int]$pic.blipfill.srcRect.r)
-
-
-                    if (($rIds.Count -gt 0) -and ($rIds.Name -contains $rId)) {
-                        $index = $rIds.name.indexof($rId)
-                        $rIds[$index].Total++
-
-                        if ($rIds[$index].Ratio -gt $ratio) {
-                            $rIds[$index].Ratio = $ratio
-                        }
-
-                        if ($rIds[$index].UtilisationV -lt $utilVertical) {
-                            $rIds[$index].UtilisationV = $utilVertical
-                        }
-
-                        if ($rIds[$index].UtilisationH -lt $utilHorizontal) {
-                            $rIds[$index].UtilisationH = $utilHorizontal
-                        }
-                    }
-                    else {
-                        $newItem = [PPTXImage]::new($rId)
-                        $newItem.ratio = $ratio
-                        $newItem.utilisationV = $utilVertical
-                        $newItem.utilisationH = $utilHorizontal
-                        $newItem.total = 1
-
-                        $rIds += $newItem
-                    }
-
-                    #Si l'image est un preview de vidéo, on ajoute la vidéo dans la liste
-                    if ($pic.nvpicpr.nvpr.videofile.link -ne $null) {
-                        $rId = $pic.nvpicpr.nvpr.videofile.link
-                        if (($rIds.Count -gt 0) -and ($rIds.Name -contains $rId)) {
-                            $index = $rIds.name.indexof($rId)
-                            $rIds[$index].Total++
-                        }
-                        else {
-                            $newItem = [PPTXVideo]::new($rId)
-                            $newItem.total = 1
-
-                            $rIds += $newItem
-                        }
-                    }
+                    $rIds = GetImageFromXML $rIds $pic
                 }
 
                 #Word, Excel, PowerPoint
@@ -249,91 +369,9 @@ Class PPTXPowerPoint : PPTXFile
 
                     [xml]$relsContent = GetEntryAsXML $entry
 
-                    #Pour chaque rId: le nom du fichier associée, puis met à jour les informations ou créé l'entrée
                     for($j=0;$j -lt $rIds.Length;$j++) {
                         $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
-                        
-
-                        #Images
-                        if ($xmlNode.Type -eq "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image") {
-                            $image = $xmlNode.Target.Substring(9)
-                            if (($this.arrayImages.Count -gt 0) -and ($this.arrayImages.Name -contains $image)) {
-                                $indexImage = $this.arrayImages.name.indexof($image)
-
-                                $this.arrayImages[$indexImage].Total = $this.arrayImages[$indexImage].Total + $rIds[$j].Total
-                                $this.arrayImages[$indexImage].Slides += $i
-
-                                if ($this.arrayImages[$indexImage].Ratio -gt $rIds[$j].ratio) {
-                                    $this.arrayImages[$indexImage].Ratio = $rIds[$j].Ratio
-                                }
-
-                                if ($this.arrayImages[$indexImage].utilisationV -lt $rIds[$j].utilisationV) {
-                                    $this.arrayImages[$indexImage].utilisationV = $rIds[$j].utilisationV
-                                }
-
-                                if ($this.arrayImages[$indexImage].utilisationH -lt $rIds[$j].utilisationH) {
-                                    $this.arrayImages[$indexImage].utilisationH = $rIds[$j].utilisationH
-                                }
-                            }
-                            else {
-                                $newItem = [PPTXImage]::new($image)
-                                $newItem.ratio = $rIds[$j].ratio
-                                $newItem.utilisationV = $rIds[$j].utilisationV
-                                $newItem.utilisationH = $rIds[$j].utilisationH
-                                $newItem.slides = @($i)
-                                $newItem.total = $rIds[$j].total
-                                $this.arrayImages += $newItem
-                            }
-                        }
-
-                        #Videos
-                        elseif ($xmlNode.Type -eq "http://schemas.openxmlformats.org/officeDocument/2006/relationships/video") {
-                            $image = $xmlNode.Target.Substring(9)
-                            if (($this.arrayImages.Count -gt 0) -and ($this.arrayImages.Name -contains $image)) {
-                                $indexImage = $this.arrayImages.name.indexof($image)
-
-                                $this.arrayImages[$indexImage].Total = $this.arrayImages[$indexImage].Total + $rIds[$j].Total
-                                $this.arrayImages[$indexImage].Slides += $i
-                            }
-                            else {
-                                $newItem = [PPTXVideo]::new($image)
-                                $newItem.slides = @($i)
-                                $newItem.total = $rIds[$j].total
-                                $this.arrayImages += $newItem
-                            }
-                        }
-
-                        #Word, Excel, PowerPoint
-                        elseif ($xmlNode.Type -eq "http://schemas.openxmlformats.org/officeDocument/2006/relationships/package") {
-                            $image = $xmlNode.Target.Substring(14)
-                            if (($this.arrayImages.Count -gt 0) -and ($this.arrayImages.Name -contains $image)) {
-                                $indexImage = $this.arrayImages.name.indexof($image)
-
-                                $this.arrayImages[$indexImage].Total = $this.arrayImages[$indexImage].Total + $rIds[$j].Total
-                                $this.arrayImages[$indexImage].Slides += $i
-                            }
-                            else {
-                                $itemType = $image.Substring($image.get_Length()-4)
-
-                                if ($itemType -eq "pptx") {
-                                    $newItem = [PPTXPowerPoint]::new($image, $false)
-                                }
-                                elseif ($itemType -eq "xlsx") {
-                                    $newItem = [PPTXExcel]::new($image, $false)
-                                }
-                                elseif ($itemType -eq "docx") {
-                                    $newItem = [PPTXWord]::new($image, $false)
-                                }
-                                else {
-                                    $newItem = [PPTXFile]::new()
-                                    $newItem.name = $image
-                                }
-                                
-                                $newItem.slides = @($i)
-                                $newItem.total = $rIds[$j].total
-                                $this.arrayImages += $newItem
-                            }
-                        }
+                        GetRelsFromXML $this $rIds[$j] $xmlNode
                     }  
                 }
 
@@ -350,20 +388,7 @@ Class PPTXPowerPoint : PPTXFile
             $i++
         }
 
-        foreach ($file in $this.arrayImages) {
-            $filePath = ""
-
-            if ($file.GetType().Name -eq "PPTXImage" -or $file.GetType().Name -eq "PPTXVideo") {
-                $filePath = "ppt/media/" + $file.Name
-            }
-
-            elseif ($file.GetType().Name -eq "PPTXPowerPoint" -or $file.GetType().Name -eq "PPTXExcel" -or $file.GetType().Name -eq "PPTXWord") {
-                $filePath = "ppt/embeddings/" + $file.Name
-            }
-
-            $entry = $this.zipArchive.GetEntry($filePath)
-            $hasWarning = $file.CreateWarning($entry)
-        }
+        CreateFileWarnings $this
     }
 
     [bool]CreateWarning($entry)
@@ -381,7 +406,7 @@ Class PPTXPowerPoint : PPTXFile
 
 Class PPTXWord : PPTXFile
 {
-    [PPTXFile[]]$arrayFiles
+    [PPTXFile[]]$arrayImages
     hidden $zipArchive
 
     PPTXWord ([string]$name, [bool]$analyseNow)
@@ -402,15 +427,29 @@ Class PPTXWord : PPTXFile
 
             $docContent = GetEntryAsXML $entry
             
-            $namespace = @{a = "http://schemas.openxmlformats.org/drawingml/2006/main"}
-            $graphics = $docContent | Select-Xml -Namespace $namespace -XPath "//a:graphic"
+            $namespace = @{pic = "http://schemas.openxmlformats.org/drawingml/2006/picture"}
+            $pics = $docContent | Select-Xml -Namespace $namespace -XPath "//pic:pic"
             
-            foreach ($graphic in $graphics) {
-                #$graphic.node.graphicData.pic.spPr.xfrm.ext.cx
+            foreach ($pic in $pics.Node) {
+                $rIds = GetImageFromXML $rIds $pic
             }
 
-            
+            #Référence dans le fichier xml.rels 
+            $relsPath = "word/_rels/document.xml.rels"
+            $entry = $this.zipArchive.GetEntry($relsPath)
+
+            if ($entry) {
+
+                [xml]$relsContent = GetEntryAsXML $entry
+
+                for($j=0;$j -lt $rIds.Length;$j++) {
+                    $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
+                    GetRelsFromXML $this $rIds[$j] $xmlNode
+                }  
+            }
         }
+
+        CreateFileWarnings $this
     }
 
     [bool]CreateWarning($entry)
