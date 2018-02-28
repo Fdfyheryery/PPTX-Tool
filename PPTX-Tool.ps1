@@ -96,19 +96,20 @@ Class PPTXVideo : PPTXFile
 Class PPTXExcel : PPTXFile
 {
     [PPTXFile[]]$arrayFiles
+    hidden $zipArchive
 
     PPTXExcel ([string]$name, [bool]$analyseNow)
     {
         $this.name = $name
         if ($analyseNow) {
-            #$this.zipArchive = [System.IO.Compression.ZipFile]::OpenRead($this.name)
-            #$this.AnalyzeFile()
-            #$this.zipArchive.Dispose()
+            #CallAnalyzeFromName $this $name
         }
     }
 
     [bool]CreateWarning($entry)
     {
+        #CallAnalyzeFromEntry $this $entry
+
         $this.filesize = $entry.Length
         if ($this.filesize -gt 1KB) {
             $this.warning = "Ce fichier Excel à un poid supérieur à 1KB"
@@ -367,8 +368,6 @@ Class PPTXPowerPoint : PPTXFile
 
     [bool]CreateWarning($entry)
     {
-        #TODO: Retirer les commentaires pour tester la récursivité
-        
         CallAnalyzeFromEntry $this $entry
 
         $this.filesize = $entry.Length
@@ -383,19 +382,41 @@ Class PPTXPowerPoint : PPTXFile
 Class PPTXWord : PPTXFile
 {
     [PPTXFile[]]$arrayFiles
+    hidden $zipArchive
 
     PPTXWord ([string]$name, [bool]$analyseNow)
     {
         $this.name = $name
         if ($analyseNow) {
-            #$this.zipArchive = [System.IO.Compression.ZipFile]::OpenRead($this.name)
-            #$this.AnalyzeFile()
-            #$this.zipArchive.Dispose()
+            CallAnalyzeFromName $this $name
+        }
+    }
+
+    hidden [void] AnalyzeFile() {
+        $docPath = "word/document.xml"
+        $entry = $this.zipArchive.GetEntry($docPath)
+
+        if ($entry) {
+            $rIds = $null
+            [PPTXFile[]]$rIds = @()
+
+            $docContent = GetEntryAsXML $entry
+            
+            $namespace = @{a = "http://schemas.openxmlformats.org/drawingml/2006/main"}
+            $graphics = $docContent | Select-Xml -Namespace $namespace -XPath "//a:graphic"
+            
+            foreach ($graphic in $graphics) {
+                #$graphic.node.graphicData.pic.spPr.xfrm.ext.cx
+            }
+
+            
         }
     }
 
     [bool]CreateWarning($entry)
     {
+        #CallAnalyzeFromEntry $this $entry
+
         $this.filesize = $entry.Length
         if ($this.filesize -gt 3KB) {
             $this.warning = "Ce fichier Word à un poid supérieur à 3KB"
@@ -405,16 +426,22 @@ Class PPTXWord : PPTXFile
     }
 }
 
-#Ouvre une fenêtre pour la sélection du fichier PowerPoint
+#Ouvre une fenêtre pour la sélection du fichier
 Add-Type -AssemblyName System.Windows.Forms
 $openFileDialog = New-Object Windows.Forms.OpenFileDialog
 $openFileDialog.initialDirectory = [System.IO.Directory]::GetCurrentDirectory()
-$openFileDialog.filter = "Powerpoint Presentations (*.pptx)|*.pptx"
+$openFileDialog.filter = "Word, Excel, PowerPoint (*.docx, *.xlxs, *pptx)|*.docx;*.pptx;*.xlsx"
 $result = $openFileDialog.ShowDialog()
 
 if (($result -eq "OK") -and $openFileDialog.CheckFileExists) {
 
-    [PPTXPowerPoint]$analyzedFile = [PPTXPowerPoint]::new($openFileDialog.FileName, $true)
+    if ($openFileDialog.FileName.Substring($openFileDialog.FileName.Length - 4) -eq "pptx") {
+        [PPTXPowerPoint]$analyzedFile = [PPTXPowerPoint]::new($openFileDialog.FileName, $true)
+    }
+    elseif ($openFileDialog.FileName.Substring($openFileDialog.FileName.Length - 4) -eq "docx") {
+        [PPTXWord]$analyzedFile = [PPTXWord]::new($openFileDialog.FileName, $true)
+    }
+    
 
     #Affichage temporaire
     $analyzedFile.arrayImages | Where-Object {$_.warning}
