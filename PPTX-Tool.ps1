@@ -45,6 +45,13 @@ function CallAnalyzeFromName {
     $file.zipArchive.Dispose()
 }
 
+#Bypassing a class limitation
+function ExtractImgToFile {
+    param($entry, [string]$dPath)
+
+    [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dPath)
+}
+
 function GetImageFromXML {
     param([PPTXFile[]]$rIds, $pic)
 
@@ -223,6 +230,171 @@ function CreateFileWarnings {
     }
 }
 
+function GenerateHTMLReport {
+    param([PPTXFile]$file)
+
+    #Début du fichier html
+    $html = 
+@" 
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+
+    <title>Résultats PPTX-Tool</title>
+    <meta name="description" content="PPTX-Tool Results">
+    <meta name="author" content="Fdfyheryery">
+    
+    <link rel="stylesheet" href="css/reset.css">
+    <link rel="stylesheet" href="css/style.css">
+	<style>
+		<!-- Reset -->
+		html, body, div, span, applet, object, iframe,
+		h1, h2, h3, h4, h5, h6, p, blockquote, pre,
+		a, abbr, acronym, address, big, cite, code,
+		del, dfn, em, img, ins, kbd, q, s, samp,
+		small, strike, strong, sub, sup, tt, var,
+		b, u, i, center,
+		dl, dt, dd, ol, ul, li,
+		fieldset, form, label, legend,
+		table, caption, tbody, tfoot, thead, tr, th, td,
+		article, aside, canvas, details, embed, 
+		figure, figcaption, footer, header, hgroup, 
+		menu, nav, output, ruby, section, summary,
+		time, mark, audio, video {
+			margin: 0;
+			padding: 0;
+			border: 0;
+			font-size: 100%;
+			font: inherit;
+			vertical-align: baseline;
+		}
+		article, aside, details, figcaption, figure, 
+		footer, header, hgroup, menu, nav, section {
+			display: block;
+		}
+		body {
+			line-height: 1;
+		}
+		ol, ul {
+			list-style: none;
+		}
+		blockquote, q {
+			quotes: none;
+		}
+		blockquote:before, blockquote:after,
+		q:before, q:after {
+			content: '';
+			content: none;
+		}
+		table {
+			border-collapse: collapse;
+			border-spacing: 0;
+		}
+	
+		<!-- Style -->
+		.content {
+			width: 97%;
+			margin: auto;
+			font-size: 1.1em;
+			font-family: "Segoe UI";
+		}
+
+		.PPTXFile {
+			margin: 10px;
+			padding: 5px 10px;
+			border: solid 1px #e2e2e2;
+			font-family: "Segoe UI";
+			font-weight: 400;
+		}
+
+		.PPTXFile_img {
+			height: 36px;
+			width: 40px;
+			font-weight: 300;
+			font-size: 1.4em;
+			color: #fefefe;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			margin-right: 6px;
+			padding-bottom: 4px;
+			float: left;
+		}
+
+		.PPTX_others {
+			height: 27px;
+			width: 30px;
+			background-color: #c2c2c2;
+			font-family: "Segoe UI";
+			font-weight: 300;
+			font-size: 1.2em;
+			color: #fefefe;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			margin-right: 6px;
+			padding-bottom: 3px;
+			float: left;
+		}
+
+		.PPTXImage {
+			max-width: 100px;
+			max-height: 75px;
+			margin: 10px 10px 0px 0px;
+		}
+
+		.PPTXWord_img {
+			background-color: #164FB3;
+		}
+
+		.PPTXExcel_img {
+			background-color: #06663C;
+		}
+
+		.PPTXPowerPoint_img {
+			background-color: #D64206;
+		}
+
+		.line {
+			min-height: 40px;
+			display: flex;
+			align-items: center;
+			justify-content: left;
+		}
+
+		.line_child {
+			margin-left: 20px;
+			font-size: 0.75em;
+		}
+
+		.warning {
+			font-size: 0.9em;
+			font-weight: 600;
+			color: #C8B906;
+			margin-left: 25px;
+		}
+	</style>
+</head>
+
+<body>
+    <div class="content">
+"@
+
+    #Ajoute les items dynamiquement
+    $html = $html + $file.GenerateHTML($false)
+    $html = $html.Replace($appTempPath + "\", "")
+
+    #Bloc de fin du fichier
+    $html = $html + @"
+	</div>
+</body>
+</html> 
+"@
+	
+    return $html
+}
+
 Class PPTXFile
 {
     [string]$name
@@ -259,11 +431,17 @@ Class PPTXImage : PPTXFile
             if ($DirExists -eq $false) {
                 New-Item -ItemType directory -Path $this.decompressPath
             }
-            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dPath)
-
+            ExtractImgToFile $entry $dPath
         }
 
         return $hasWarning;
+    }
+
+    [string]GenerateHTML([bool]$isChild)
+    {
+        $html = '<div class="line line_child"><img class="PPTXImage" src="' + $this.decompressPath `
+            + "/" + $this.name +'" />' + $this.name + ' <span class="warning">' + $this.warning + '</span></div>'
+        return $html
     }
 }
 
@@ -284,6 +462,13 @@ Class PPTXVideo : PPTXFile
             return $true;
         }
         return $false;
+    }
+
+    [string]GenerateHTML([bool]$isChild)
+    {
+        $html = '<div class="line line_child"><div class="PPTX_others">V</div>'`
+            + $this.name + '<span class="warning">' + $this.warning + '</span></div>'
+        return $html
     }
 }
 
@@ -314,6 +499,27 @@ Class PPTXExcel : PPTXFile
             return $true;
         }
         return $false;
+    }
+
+    [string]GenerateHTML([bool]$isChild)
+    {
+        $imgClass = "PPTXFile_img PPTXExcel_img"
+
+        if ($isChild) {
+            $imgClass = "PPTX_others PPTXExcel_img"
+        }
+
+        $html = ' <div class="PPTXFile"><div class="line"><div class="' + $imgClass + '">E</div>'`
+            + $this.name + '<span class="warning">' + $this.warning + '</span></div>'
+
+        foreach ($file in $this.arrayImages) {
+            if ($file.warning) {
+                $html = $html + $file.GenerateHTML($true)
+            }
+        }
+
+        $html = $html + '</div>'
+        return $html
     }
 }
 
@@ -427,6 +633,27 @@ Class PPTXPowerPoint : PPTXFile
         }
         return $false;
     }
+
+    [string]GenerateHTML([bool]$isChild)
+    {
+        $imgClass = "PPTXFile_img PPTXPowerPoint_img"
+
+        if ($isChild) {
+            $imgClass = "PPTX_others PPTXPowerPoint_img"
+        }
+
+        $html = ' <div class="PPTXFile"><div class="line"><div class="' + $imgClass + '">P</div>'`
+            + $this.name + '<span class="warning">' + $this.warning + '</span></div>'
+
+        foreach ($file in $this.arrayImages) {
+            if ($file.warning) {
+                $html = $html + $file.GenerateHTML($true)
+            }
+        }
+
+        $html = $html + '</div>'
+        return $html
+    }
 }
 
 Class PPTXWord : PPTXFile
@@ -493,6 +720,28 @@ Class PPTXWord : PPTXFile
         }
         return $false;
     }
+
+    [string]GenerateHTML([bool]$isChild)
+    {
+        $imgClass = "PPTXFile_img PPTXWord_img"
+
+        if ($isChild) {
+            $imgClass = "PPTX_others PPTXWord_img"
+        }
+
+        $html = ' <div class="PPTXFile"><div class="line"><div class="' + $imgClass + '">W</div>'`
+            + $this.name + '<span class="warning">' + $this.warning + '</span></div>'
+
+        foreach ($file in $this.arrayImages) {
+            if ($file.warning) {
+                $html = $html + $file.GenerateHTML($true)
+            }
+        }
+
+        $html = $html + '</div>'
+
+        return $html
+    }
 }
 
 #Ouvre une fenêtre pour la sélection du fichier
@@ -522,6 +771,14 @@ if (($result -eq "OK") -and $openFileDialog.CheckFileExists) {
 
     #Affichage temporaire
     $analyzedFile.arrayImages | Where-Object {$_.warning}
+
+    #Génération du rapport HTML
+    $html = GenerateHTMLReport $analyzedFile
+    $path = $appTempPath + "\results.html"
+    $html | Out-File -filepath $path
+
+    Invoke-Item $path
+    start-sleep 5
 
     #Détruit les fichiers temporaires
     if(Test-Path $appTempPath) {
