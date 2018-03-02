@@ -13,6 +13,9 @@ WIP
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
+#Emplacement des fichiers décompressés (images pour rapport HTML)
+$appTempPath = $Env:temp + "\PPTX-Tool"
+
 function GetEntryAsXML {
     param([System.IO.Compression.ZipArchiveEntry]$entry)
 
@@ -138,6 +141,7 @@ function GetRelsFromXML {
             $newItem.utilisationH = $RIdItem.utilisationH
             $newItem.slides = @($i)
             $newItem.total = $RIdItem.total
+            $newItem.decompressPath = $appTempPath + "\" + $file.name.Substring(0, $file.name.Length - 5)
             $file.arrayImages += $newItem
         }
     }
@@ -168,19 +172,20 @@ function GetRelsFromXML {
         }
         else {
             $itemType = $image.Substring($image.get_Length()-4)
+            $newItemName = $file.name.Substring(0, $file.name.Length - 5) + "\" + $image
 
             if ($itemType -eq "pptx") {
-                $newItem = [PPTXPowerPoint]::new($image, $false)
+                $newItem = [PPTXPowerPoint]::new($newItemName, $false)
             }
             elseif ($itemType -eq "xlsx") {
-                $newItem = [PPTXExcel]::new($image, $false)
+                $newItem = [PPTXExcel]::new($newItemName, $false)
             }
             elseif ($itemType -eq "docx") {
-                $newItem = [PPTXWord]::new($image, $false)
+                $newItem = [PPTXWord]::new($newItemName, $false)
             }
             else {
                 $newItem = [PPTXFile]::new()
-                $newItem.name = $image
+                $newItem.name = $newItemName
             }
                                 
             $newItem.slides = @($i)
@@ -210,7 +215,7 @@ function CreateFileWarnings {
         }
 
         elseif ($file.GetType().Name -eq "PPTXPowerPoint" -or $file.GetType().Name -eq "PPTXExcel" -or $file.GetType().Name -eq "PPTXWord") {
-            $filePath = $startPath + "embeddings/" + $file.Name
+            $filePath = $startPath + "embeddings/" + $file.Name.Split("\")[-1]
         }
 
         $entry = $pptxfile.zipArchive.GetEntry($filePath)
@@ -232,6 +237,7 @@ Class PPTXImage : PPTXFile
     [double]$ratio
     [int]$utilisationV
     [int]$utilisationH
+    [string]$decompressPath
 
     PPTXImage ([string]$name)
     {
@@ -240,12 +246,24 @@ Class PPTXImage : PPTXFile
 
     [bool]CreateWarning($entry)
     {
+        $hasWarning = $false
         $this.filesize = $entry.Length
         if ($this.filesize -gt 1KB) {
             $this.warning = "Cette image à un poid supérieur à 1KB"
-            return $true;
+            $hasWarning = $true
         }
-        return $false;
+
+        if ($hasWarning) {
+            $dPath = $this.decompressPath + "\" + $this.name
+            $DirExists = Test-Path $dPath 
+            if ($DirExists -eq $false) {
+                New-Item -ItemType directory -Path $this.decompressPath
+            }
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dPath)
+
+        }
+
+        return $hasWarning;
     }
 }
 
@@ -276,9 +294,13 @@ Class PPTXExcel : PPTXFile
 
     PPTXExcel ([string]$name, [bool]$analyseNow)
     {
-        $this.name = $name
+        
         if ($analyseNow) {
+            $this.name = $name.split("\")[-1]
             #CallAnalyzeFromName $this $name
+        }
+        else {
+            $this.name = $name
         }
     }
 
@@ -302,9 +324,12 @@ Class PPTXPowerPoint : PPTXFile
 
     PPTXPowerPoint ([string]$name, [bool]$analyseNow)
     {
-        $this.name = $name
         if ($analyseNow) {
+            $this.name = $name.split("\")[-1]
             CallAnalyzeFromName $this $name
+        }
+        else {
+            $this.name = $name
         }
     }
 
@@ -411,9 +436,13 @@ Class PPTXWord : PPTXFile
 
     PPTXWord ([string]$name, [bool]$analyseNow)
     {
-        $this.name = $name
+        $this.name = $name.split("\")[-1]
         if ($analyseNow) {
+            $this.name = $name.split("\")[-1]
             CallAnalyzeFromName $this $name
+        }
+        else {
+            $this.name = $name
         }
     }
 
@@ -427,6 +456,7 @@ Class PPTXWord : PPTXFile
 
             $docContent = GetEntryAsXML $entry
             
+            #Image
             $namespace = @{pic = "http://schemas.openxmlformats.org/drawingml/2006/picture"}
             $pics = $docContent | Select-Xml -Namespace $namespace -XPath "//pic:pic"
             
@@ -454,7 +484,7 @@ Class PPTXWord : PPTXFile
 
     [bool]CreateWarning($entry)
     {
-        #CallAnalyzeFromEntry $this $entry
+        CallAnalyzeFromEntry $this $entry
 
         $this.filesize = $entry.Length
         if ($this.filesize -gt 3KB) {
@@ -474,6 +504,14 @@ $result = $openFileDialog.ShowDialog()
 
 if (($result -eq "OK") -and $openFileDialog.CheckFileExists) {
 
+    #Crée un répertoire temporaire pour le rapport HTML (images)
+    if(Test-Path $appTempPath) {
+        Remove-Item $appTempPath -Force -Recurse
+    }
+
+    $newDir = New-Item -ItemType directory -Path $appTempPath
+
+    #Lance l'analyse
     if ($openFileDialog.FileName.Substring($openFileDialog.FileName.Length - 4) -eq "pptx") {
         [PPTXPowerPoint]$analyzedFile = [PPTXPowerPoint]::new($openFileDialog.FileName, $true)
     }
@@ -484,5 +522,10 @@ if (($result -eq "OK") -and $openFileDialog.CheckFileExists) {
 
     #Affichage temporaire
     $analyzedFile.arrayImages | Where-Object {$_.warning}
+
+    #Détruit les fichiers temporaires
+    if(Test-Path $appTempPath) {
+        Remove-Item $appTempPath -Force -Recurse
+    }
     
 }
