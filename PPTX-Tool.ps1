@@ -59,13 +59,8 @@ function GetImageFromXML {
     $rId = $pic.blipfill.blip.embed
 
     #Ratio
-    if ($pic.sppr.xfrm.ext.cx -lt $pic.sppr.xfrm.ext.cy) {
-        $ratio = $pic.sppr.xfrm.ext.cx / 914400
-                    
-    }
-    else {
-        $ratio = $pic.sppr.xfrm.ext.cy / 914400
-    }
+    $cx = $pic.sppr.xfrm.ext.cx
+    $cy = $pic.sppr.xfrm.ext.cy
 
     #Utilisation (Rognage) (10000 = 10.000%)
     $utilVertical = 100000 - ([int]$pic.blipfill.srcRect.t + [int]$pic.blipfill.srcRect.b)
@@ -76,8 +71,12 @@ function GetImageFromXML {
         $index = $rIds.name.indexof($rId)
         $rIds[$index].Total++
 
-        if ($rIds[$index].Ratio -gt $ratio) {
-            $rIds[$index].Ratio = $ratio
+        if ($rIds[$index].cx -lt $cx) {
+            $rIds[$index].cx = $cx
+        }
+
+        if ($rIds[$index].cy -lt $cy) {
+            $rIds[$index].cy = $cy
         }
 
         if ($rIds[$index].UtilisationV -lt $utilVertical) {
@@ -90,7 +89,8 @@ function GetImageFromXML {
     }
     else {
         $newItem = [PPTXImage]::new($rId)
-        $newItem.ratio = $ratio
+        $newItem.cx = $cx
+        $newItem.cy = $cy
         $newItem.utilisationV = $utilVertical
         $newItem.utilisationH = $utilHorizontal
         $newItem.total = 1
@@ -129,8 +129,12 @@ function GetRelsFromXML {
             $file.arrayImages[$indexImage].Total = $file.arrayImages[$indexImage].Total + $RIdItem.Total
             $file.arrayImages[$indexImage].Slides += $i
 
-            if ($file.arrayImages[$indexImage].Ratio -gt $RIdItem.ratio) {
-                $file.arrayImages[$indexImage].Ratio = $RIdItem.Ratio
+            if ($file.arrayImages[$indexImage].cx -lt $RIdItem.cx) {
+                $file.arrayImages[$indexImage].cx = $RIdItem.cx
+            }
+
+            if ($file.arrayImages[$indexImage].cy -lt $RIdItem.cy) {
+                $file.arrayImages[$indexImage].cy = $RIdItem.cy
             }
 
             if ($file.arrayImages[$indexImage].utilisationV -lt $RIdItem.utilisationV) {
@@ -143,7 +147,8 @@ function GetRelsFromXML {
         }
         else {
             $newItem = [PPTXImage]::new($image)
-            $newItem.ratio = $RIdItem.ratio
+            $newItem.cx = $RIdItem.cx
+            $newItem.cy = $RIdItem.cy
             $newItem.utilisationV = $RIdItem.utilisationV
             $newItem.utilisationH = $RIdItem.utilisationH
             $newItem.slides = @($i)
@@ -406,7 +411,8 @@ Class PPTXFile
 
 Class PPTXImage : PPTXFile
 {
-    [double]$ratio
+    [int]$cx
+    [int]$cy
     [int]$utilisationV
     [int]$utilisationH
     [string]$decompressPath
@@ -419,19 +425,30 @@ Class PPTXImage : PPTXFile
     [bool]CreateWarning($entry)
     {
         $hasWarning = $false
+
+        $dPath = $this.decompressPath + "\" + $this.name
+        $DirExists = Test-Path $dPath 
+        if ($DirExists -eq $false) {
+            New-Item -ItemType directory -Path $this.decompressPath
+        }
+        ExtractImgToFile $entry $dPath
+
+        $objShell = New-Object -ComObject Shell.Application 
+        $objFolder = $objShell.namespace($this.decompressPath) 
+        $File = $objFolder.ParseName($this.name)
+        $width = $objFolder.getDetailsOf($File, 162)
+        $height = $objFolder.getDetailsOf($File, 164)
+
+        $width = $width.replace(" pixels","").remove(0,1)
+        $height = $height.replace(" pixels","").remove(0,1)
+
+        $ratioX = ([double]$width * 9525) / $this.cx
+        $ratioY = ([double]$height * 9525) / $this.cy
+
         $this.filesize = $entry.Length
         if ($this.filesize -gt 1KB) {
             $this.warning = "Cette image à un poid supérieur à 1KB"
             $hasWarning = $true
-        }
-
-        if ($hasWarning) {
-            $dPath = $this.decompressPath + "\" + $this.name
-            $DirExists = Test-Path $dPath 
-            if ($DirExists -eq $false) {
-                New-Item -ItemType directory -Path $this.decompressPath
-            }
-            ExtractImgToFile $entry $dPath
         }
 
         return $hasWarning;
