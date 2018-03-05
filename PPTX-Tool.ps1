@@ -222,6 +222,10 @@ function CreateFileWarnings {
             $startPath = "word/"
         }
 
+        elseif ($pptxfile.GetType().Name -eq "PPTXExcel") {
+            $startPath = "xl/"
+        }
+
         if ($file.GetType().Name -eq "PPTXImage" -or $file.GetType().Name -eq "PPTXVideo") {
             $filePath = $startPath + "media/" + $file.Name
         }
@@ -377,7 +381,7 @@ function GenerateHTMLReport {
 			font-size: 0.9em;
 			font-weight: 600;
 			color: #C8B906;
-			margin-left: 25px;
+			margin-left: 20px;
 		}
 	</style>
 </head>
@@ -491,7 +495,7 @@ Class PPTXVideo : PPTXFile
 
 Class PPTXExcel : PPTXFile
 {
-    [PPTXFile[]]$arrayFiles
+    [PPTXFile[]]$arrayImages
     hidden $zipArchive
 
     PPTXExcel ([string]$name, [bool]$analyseNow)
@@ -499,16 +503,139 @@ Class PPTXExcel : PPTXFile
         
         if ($analyseNow) {
             $this.name = $name.split("\")[-1]
-            #CallAnalyzeFromName $this $name
+            CallAnalyzeFromName $this $name
         }
         else {
             $this.name = $name
         }
     }
 
+    hidden [void] AnalyzeFile() {
+
+        #On incrémente et vérifie si le drawing existe (commencent à 1)
+        $i = 1
+        $drawingExist = $true;
+        while($drawingExist -eq $true) {
+            $docPath = "xl/drawings/drawing" + $i + ".xml"
+            $entry = $this.zipArchive.GetEntry($docPath)
+
+            if ($entry) {
+                $rIds = $null
+                [PPTXFile[]]$rIds = @()
+
+                $docContent = GetEntryAsXML $entry
+            
+                #Image
+                $namespace = @{xdr = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"}
+                $pics = $docContent | Select-Xml -Namespace $namespace -XPath "//xdr:pic"
+            
+                foreach ($pic in $pics.Node) {
+                    $rIds = GetImageFromXML $rIds $pic
+                }
+
+                #Référence dans le fichier xml.rels 
+                $relsPath = "xl/drawings/_rels/drawing" + $i + ".xml.rels"
+                $entry = $this.zipArchive.GetEntry($relsPath)
+
+                if ($entry) {
+
+                    [xml]$relsContent = GetEntryAsXML $entry
+
+                    for($j=0;$j -lt $rIds.Length;$j++) {
+                        $xmlNode = $relsContent.relationships.Relationship#.Where({$_.Id -eq $rIds[$j].name})
+                        GetRelsFromXML $this $rIds[$j] $xmlNode
+                    }  
+                }
+            }
+
+            else {
+                $drawingExist = $false
+            }
+
+            $i++
+        }
+
+        $i = 1
+        $sheetExist = $true;
+        while($sheetExist -eq $true) {
+            $docPath = "xl/worksheets/sheet" + $i + ".xml"
+            $entry = $this.zipArchive.GetEntry($docPath)
+
+            if ($entry) {
+                $rIds = $null
+                [PPTXFile[]]$rIds = @()
+
+                $docContent = GetEntryAsXML $entry
+            
+                #Image
+                $namespace = @{mc = "http://schemas.openxmlformats.org/markup-compatibility/2006"}
+                $fallbacks = $docContent | Select-Xml -Namespace $namespace -XPath "//mc:Fallback"
+            
+                foreach ($fallback in $fallbacks.Node) {
+                    #$rIds = GetDocFromXML $rIds $fallback
+
+                    #rID
+                    $rId = $fallback.oleObject.id
+
+                    if ($rId -ne $null) {
+                        if (($rIds.Count -gt 0) -and ($rIds.Name -contains $rId)) {
+                            $index = $rIds.name.indexof($rId)
+                            $rIds[$index].Total++
+                        }
+                        else {
+                            $itemType = $fallback.oleObject.progId
+
+                            if ($itemType -eq "Word") {
+                                $newItem = [PPTXWord]::new($rId, $false)
+                            }
+                            elseif ($itemType -eq "Exce") {
+                                $newItem = [PPTXExcel]::new($rId, $false)
+                            }
+                            elseif ($itemType -eq "Présentation") {
+                                $newItem = [PPTXPowerPoint]::new($rId, $false)
+                            }
+                            else {
+                                $newItem = [PPTXFile]::new()
+                                $newItem.name = $rId
+                            }
+                            
+                            $newItem.total = 1
+                            $rIds += $newItem
+                        }
+                    }
+                }
+
+                #Référence dans le fichier xml.rels 
+                $relsPath = "xl/worksheets/_rels/sheet" + $i + ".xml.rels"
+                $entry = $this.zipArchive.GetEntry($relsPath)
+
+                if ($entry) {
+
+                    [xml]$relsContent = GetEntryAsXML $entry
+
+                    for($j=0;$j -lt $rIds.Length;$j++) {
+                        $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
+                        GetRelsFromXML $this $rIds[$j] $xmlNode
+                    }  
+                }
+            }
+
+            else {
+                $sheetExist = $false
+            }
+
+            $i++
+        }      
+
+        CreateFileWarnings $this
+    }
+
     [bool]CreateWarning($entry)
     {
-        #CallAnalyzeFromEntry $this $entry
+        CallAnalyzeFromEntry $this $entry
+
+        #Warning vide pour toujours afficher ces fichiers
+        $this.warning = " "
 
         $this.filesize = $entry.Length
         if ($this.filesize -gt 1KB) {
@@ -521,12 +648,14 @@ Class PPTXExcel : PPTXFile
     [string]GenerateHTML([bool]$isChild)
     {
         $imgClass = "PPTXFile_img PPTXExcel_img"
+        $style = ""
 
         if ($isChild) {
             $imgClass = "PPTX_others PPTXExcel_img"
+            $style = 'style="font-size:0.9em";'
         }
 
-        $html = ' <div class="PPTXFile"><div class="line"><div class="' + $imgClass + '">E</div>'`
+        $html = ' <div class="PPTXFile"><div class="line" ' + $style + '><div class="' + $imgClass + '">E</div>'`
             + $this.name + '<span class="warning">' + $this.warning + '</span></div>'
 
         foreach ($file in $this.arrayImages) {
@@ -643,23 +772,23 @@ Class PPTXPowerPoint : PPTXFile
     {
         CallAnalyzeFromEntry $this $entry
 
-        $this.filesize = $entry.Length
-        if ($this.filesize -gt 2KB) {
-            $this.warning = "Ce fichier PowerPoint à un poid supérieur à 2KB"
-            return $true;
-        }
+        #Warning vide pour toujours afficher ces fichiers
+        $this.warning = " "
+
         return $false;
     }
 
     [string]GenerateHTML([bool]$isChild)
     {
         $imgClass = "PPTXFile_img PPTXPowerPoint_img"
+        $style = ""
 
         if ($isChild) {
             $imgClass = "PPTX_others PPTXPowerPoint_img"
+            $style = 'style="font-size:0.9em";'
         }
 
-        $html = ' <div class="PPTXFile"><div class="line"><div class="' + $imgClass + '">P</div>'`
+        $html = ' <div class="PPTXFile"><div class="line" ' + $style + '><div class="' + $imgClass + '">P</div>'`
             + $this.name + '<span class="warning">' + $this.warning + '</span></div>'
 
         foreach ($file in $this.arrayImages) {
@@ -708,6 +837,42 @@ Class PPTXWord : PPTXFile
                 $rIds = GetImageFromXML $rIds $pic
             }
 
+            #Word, Excel, PowerPoint
+            $namespace = @{o = "urn:schemas-microsoft-com:office:office"}
+            $OLEObjects = $docContent | Select-Xml -Namespace $namespace -XPath "//o:OLEObject"
+
+            foreach ($OLEObject in $OLEObjects.Node) {
+                #rID
+                $rId = $OLEObject.id
+
+                if ($rId -ne $null) {
+                    if (($rIds.Count -gt 0) -and ($rIds.Name -contains $rId)) {
+                        $index = $rIds.name.indexof($rId)
+                        $rIds[$index].Total++
+                    }
+                    else {
+                        $itemtype = $OLEObject.progId.Substring(0,4)
+
+                        if ($itemType -eq "Word") {
+                            $newItem = [PPTXWord]::new($rId, $false)
+                        }
+                        elseif ($itemType -eq "Exce") {
+                            $newItem = [PPTXExcel]::new($rId, $false)
+                        }
+                        elseif ($itemType -eq "Powe") {
+                            $newItem = [PPTXPowerPoint]::new($rId, $false)
+                        }
+                        else {
+                            $newItem = [PPTXFile]::new()
+                            $newItem.name = $rId
+                        }
+                            
+                        $newItem.total = 1
+                        $rIds += $newItem
+                    }
+                }
+            }
+
             #Référence dans le fichier xml.rels 
             $relsPath = "word/_rels/document.xml.rels"
             $entry = $this.zipArchive.GetEntry($relsPath)
@@ -730,6 +895,9 @@ Class PPTXWord : PPTXFile
     {
         CallAnalyzeFromEntry $this $entry
 
+        #Warning vide pour toujours afficher ces fichiers
+        $this.warning = " "
+
         $this.filesize = $entry.Length
         if ($this.filesize -gt 3KB) {
             $this.warning = "Ce fichier Word à un poid supérieur à 3KB"
@@ -741,12 +909,14 @@ Class PPTXWord : PPTXFile
     [string]GenerateHTML([bool]$isChild)
     {
         $imgClass = "PPTXFile_img PPTXWord_img"
+        $style = ""
 
         if ($isChild) {
             $imgClass = "PPTX_others PPTXWord_img"
+            $style = 'style="font-size:0.9em";'
         }
 
-        $html = ' <div class="PPTXFile"><div class="line"><div class="' + $imgClass + '">W</div>'`
+        $html = ' <div class="PPTXFile"><div class="line" ' + $style + '><div class="' + $imgClass + '">W</div>'`
             + $this.name + '<span class="warning">' + $this.warning + '</span></div>'
 
         foreach ($file in $this.arrayImages) {
@@ -783,6 +953,9 @@ if (($result -eq "OK") -and $openFileDialog.CheckFileExists) {
     }
     elseif ($openFileDialog.FileName.Substring($openFileDialog.FileName.Length - 4) -eq "docx") {
         [PPTXWord]$analyzedFile = [PPTXWord]::new($openFileDialog.FileName, $true)
+    }
+    elseif ($openFileDialog.FileName.Substring($openFileDialog.FileName.Length - 4) -eq "xlsx") {
+        [PPTXExcel]$analyzedFile = [PPTXExcel]::new($openFileDialog.FileName, $true)
     }
     
 
