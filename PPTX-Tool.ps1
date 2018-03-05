@@ -452,11 +452,17 @@ Class PPTXImage : PPTXFile
 
             $ratioX = ([double]$width * 9525) / $this.cx
             $ratioY = ([double]$height * 9525) / $this.cy
+
+            if ($ratioX -ge 4 -and $ratioY -ge 4) {
+                $this.warning = "La taille de cette image est " + $ratioX.ToString("0.0") + " fois plus grande que son utilisation"
+                $hasWarning = $true
+            }
+
         }
 
         $this.filesize = $entry.Length
         if ($this.filesize -gt 1KB) {
-            $this.warning = "Cette image à un poid supérieur à 1KB"
+            #$this.warning = "Cette image à un poid supérieur à 1KB"
             $hasWarning = $true
         }
 
@@ -502,6 +508,7 @@ Class PPTXExcel : PPTXFile
 {
     [PPTXFile[]]$arrayImages
     hidden $zipArchive
+    [int]$conditionalFormat
 
     PPTXExcel ([string]$name, [bool]$analyseNow)
     {
@@ -509,6 +516,7 @@ Class PPTXExcel : PPTXFile
         if ($analyseNow) {
             $this.name = $name.split("\")[-1]
             CallAnalyzeFromName $this $name
+            $this.warning = $this.CreateWarning()
         }
         else {
             $this.name = $name
@@ -566,6 +574,7 @@ Class PPTXExcel : PPTXFile
             $i++
         }
 
+        #On incrémente et vérifie si le sheet existe (commencent à 1)
         $i = 1
         $sheetExist = $true;
         while($sheetExist -eq $true) {
@@ -583,8 +592,6 @@ Class PPTXExcel : PPTXFile
                 $fallbacks = $docContent | Select-Xml -Namespace $namespace -XPath "//mc:Fallback"
             
                 foreach ($fallback in $fallbacks.Node) {
-                    #$rIds = GetDocFromXML $rIds $fallback
-
                     #rID
                     $rId = $fallback.oleObject.id
 
@@ -616,6 +623,9 @@ Class PPTXExcel : PPTXFile
                     }
                 }
 
+                #Formattage conditionnel
+                $this.conditionalFormat += $docContent.worksheet.conditionalFormatting.Count
+
                 #Référence dans le fichier xml.rels 
                 $relsPath = "xl/worksheets/_rels/sheet" + $i + ".xml.rels"
                 $entry = $this.zipArchive.GetEntry($relsPath)
@@ -646,18 +656,33 @@ Class PPTXExcel : PPTXFile
         CreateFileWarnings $this
     }
 
+    hidden [string]CreateWarning() {
+        $warningMsg = ""
+
+        if ($this.conditionalFormat -gt 5) {
+            $warningMsg += "Il y a " + $this.conditionalFormat + " régles de formattage conditionnel. "
+        }
+
+        return $warningMsg
+    }
+
     [bool]CreateWarning($entry)
     {
         CallAnalyzeFromEntry $this $entry
+
+        $hasWarning = $false
 
         #Warning vide pour toujours afficher ces fichiers
         $this.warning = " "
 
         $this.filesize = $entry.Length
         if ($this.filesize -gt 1KB) {
-            $this.warning = "Ce fichier Excel à un poid supérieur à 1KB"
+            $this.warning = "Ce fichier Excel à un poid supérieur à 1KB. "
             return $true;
         }
+
+        $this.warning += $this.CreateWarning()
+        
         return $false;
     }
 
