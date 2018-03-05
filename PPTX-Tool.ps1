@@ -27,7 +27,7 @@ function GetEntryAsXML {
     return $entryXML
 }
 
-#Bypassing a class limitation
+#Contourne une limitation des classes PowerShell
 function CallAnalyzeFromEntry {
     param([PPTXFile]$file, [System.IO.Compression.ZipArchiveEntry]$entry)
 
@@ -36,7 +36,7 @@ function CallAnalyzeFromEntry {
     $file.zipArchive.Dispose()
 }
 
-#Bypassing a class limitation
+#Contourne une limitation des classes PowerShell
 function CallAnalyzeFromName {
     param([PPTXFile]$file, [string]$name)
 
@@ -45,7 +45,7 @@ function CallAnalyzeFromName {
     $file.zipArchive.Dispose()
 }
 
-#Bypassing a class limitation
+#Contourne une limitation des classes PowerShell
 function ExtractImgToFile {
     param($entry, [string]$dPath)
 
@@ -116,7 +116,7 @@ function GetImageFromXML {
 }
 
 function GetRelsFromXML {
-    param([PPTXFile]$file, [PPTXFile]$RIdItem, $xml)
+    param([PPTXFile]$file, [PPTXFile]$RIdItem, $xml, $slideNum)
 
     $image = $xmlNode.Target.split("/")[-1]
 
@@ -127,7 +127,7 @@ function GetRelsFromXML {
             $indexImage = $file.arrayImages.name.indexof($image)
 
             $file.arrayImages[$indexImage].Total = $file.arrayImages[$indexImage].Total + $RIdItem.Total
-            $file.arrayImages[$indexImage].Slides += $i
+            $file.arrayImages[$indexImage].Slides += $slideNum
 
             if ($file.arrayImages[$indexImage].cx -lt $RIdItem.cx) {
                 $file.arrayImages[$indexImage].cx = $RIdItem.cx
@@ -151,7 +151,7 @@ function GetRelsFromXML {
             $newItem.cy = $RIdItem.cy
             $newItem.utilisationV = $RIdItem.utilisationV
             $newItem.utilisationH = $RIdItem.utilisationH
-            $newItem.slides = @($i)
+            $newItem.slides = @($slideNum)
             $newItem.total = $RIdItem.total
             $newItem.decompressPath = $appTempPath + "\" + $file.name.Substring(0, $file.name.Length - 5)
             $file.arrayImages += $newItem
@@ -164,11 +164,11 @@ function GetRelsFromXML {
             $indexImage = $file.arrayImages.name.indexof($image)
 
             $file.arrayImages[$indexImage].Total = $file.arrayImages[$indexImage].Total + $RIdItem.Total
-            $file.arrayImages[$indexImage].Slides += $i
+            $file.arrayImages[$indexImage].Slides += $slideNum
         }
         else {
             $newItem = [PPTXVideo]::new($image)
-            $newItem.slides = @($i)
+            $newItem.slides = @($slideNum)
             $newItem.total = $RIdItem.total
             $file.arrayImages += $newItem
         }
@@ -180,7 +180,7 @@ function GetRelsFromXML {
             $indexImage = $this.arrayImages.name.indexof($image)
 
             $file.arrayImages[$indexImage].Total = $file.arrayImages[$indexImage].Total + $RIdItem.Total
-            $file.arrayImages[$indexImage].Slides += $i
+            $file.arrayImages[$indexImage].Slides += $slideNum
         }
         else {
             $itemType = $image.Substring($image.get_Length()-4)
@@ -200,7 +200,7 @@ function GetRelsFromXML {
                 $newItem.name = $newItemName
             }
                                 
-            $newItem.slides = @($i)
+            $newItem.slides = @($slideNum)
             $newItem.total = $RIdItem.total
             $file.arrayImages += $newItem
         }
@@ -440,14 +440,19 @@ Class PPTXImage : PPTXFile
         $objShell = New-Object -ComObject Shell.Application 
         $objFolder = $objShell.namespace($this.decompressPath) 
         $File = $objFolder.ParseName($this.name)
-        $width = $objFolder.getDetailsOf($File, 162)
-        $height = $objFolder.getDetailsOf($File, 164)
 
-        $width = $width.replace(" pixels","").remove(0,1)
-        $height = $height.replace(" pixels","").remove(0,1)
+        #Calcul du ratio,  pas de metadata sur les emf et wmf
+        $fileExt = $File.name.Split(".")[-1]
+        if ($fileExt -ne "emf" -and $fileExt -ne "wmf") {
+            $width = $objFolder.getDetailsOf($File, 162)
+            $height = $objFolder.getDetailsOf($File, 164)
 
-        $ratioX = ([double]$width * 9525) / $this.cx
-        $ratioY = ([double]$height * 9525) / $this.cy
+            $width = $width.replace(" pixels","").remove(0,1)
+            $height = $height.replace(" pixels","").remove(0,1)
+
+            $ratioX = ([double]$width * 9525) / $this.cx
+            $ratioY = ([double]$height * 9525) / $this.cy
+        }
 
         $this.filesize = $entry.Length
         if ($this.filesize -gt 1KB) {
@@ -542,8 +547,14 @@ Class PPTXExcel : PPTXFile
                     [xml]$relsContent = GetEntryAsXML $entry
 
                     for($j=0;$j -lt $rIds.Length;$j++) {
-                        $xmlNode = $relsContent.relationships.Relationship#.Where({$_.Id -eq $rIds[$j].name})
-                        GetRelsFromXML $this $rIds[$j] $xmlNode
+                        if ($relsContent.relationships.Relationship.getType().Name -eq "XmlElement") {
+                            $xmlNode = $relsContent.relationships.Relationship
+                        }
+                        else {
+                            $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
+                        }
+                        
+                        GetRelsFromXML $this $rIds[$j] $xmlNode $i
                     }  
                 }
             }
@@ -614,8 +625,13 @@ Class PPTXExcel : PPTXFile
                     [xml]$relsContent = GetEntryAsXML $entry
 
                     for($j=0;$j -lt $rIds.Length;$j++) {
-                        $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
-                        GetRelsFromXML $this $rIds[$j] $xmlNode
+                        if ($relsContent.relationships.Relationship.getType().Name -eq "XmlElement") {
+                            $xmlNode = $relsContent.relationships.Relationship
+                        }
+                        else {
+                            $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
+                        }
+                        GetRelsFromXML $this $rIds[$j] $xmlNode $i
                     }  
                 }
             }
@@ -747,8 +763,13 @@ Class PPTXPowerPoint : PPTXFile
                     [xml]$relsContent = GetEntryAsXML $entry
 
                     for($j=0;$j -lt $rIds.Length;$j++) {
-                        $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
-                        GetRelsFromXML $this $rIds[$j] $xmlNode
+                        if ($relsContent.relationships.Relationship.getType().Name -eq "XmlElement") {
+                            $xmlNode = $relsContent.relationships.Relationship
+                        }
+                        else {
+                            $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
+                        }  $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
+                        GetRelsFromXML $this $rIds[$j] $xmlNode $i
                     }  
                 }
 
@@ -882,8 +903,13 @@ Class PPTXWord : PPTXFile
                 [xml]$relsContent = GetEntryAsXML $entry
 
                 for($j=0;$j -lt $rIds.Length;$j++) {
-                    $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
-                    GetRelsFromXML $this $rIds[$j] $xmlNode
+                    if ($relsContent.relationships.Relationship.getType().Name -eq "XmlElement") {
+                        $xmlNode = $relsContent.relationships.Relationship
+                    }
+                    else {
+                        $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
+                    }
+                    GetRelsFromXML $this $rIds[$j] $xmlNode 0
                 }  
             }
         }
@@ -957,7 +983,6 @@ if (($result -eq "OK") -and $openFileDialog.CheckFileExists) {
     elseif ($openFileDialog.FileName.Substring($openFileDialog.FileName.Length - 4) -eq "xlsx") {
         [PPTXExcel]$analyzedFile = [PPTXExcel]::new($openFileDialog.FileName, $true)
     }
-    
 
     #Affichage temporaire
     $analyzedFile.arrayImages | Where-Object {$_.warning}
