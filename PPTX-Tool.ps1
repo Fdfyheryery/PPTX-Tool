@@ -554,6 +554,14 @@ Class PPTXImage : PPTXFile
 
         }
 
+        if ($this.utilisationH -le 90000) {
+            $this.warning += "Seulement " + ($this.utilisationH / 1000).ToString("0") + "% de l'image est utilisée horizontalement"
+        }
+
+        if ($this.utilisationV -le 90000) {
+            $this.warning += "Seulement " + ($this.utilisationV / 1000).ToString("0") + "% de l'image est utilisée verticalement"
+        }
+
         $this.filesize = $entry.Length
         if ($this.filesize -gt 1MB) {
             $this.warning += "Cette image prend " + ($this.filesize / 1MB).ToString("0.00") + "MB"
@@ -588,7 +596,8 @@ Class PPTXImage : PPTXFile
 
 Class PPTXVideo : PPTXFile
 {
-    [double]$length
+    #Cette information n'est probablement pas pertinente (devrait décompresser le fichier pour accéder aux metadatas)
+    #[double]$length
 
     PPTXVideo ([string]$name)
     {
@@ -597,12 +606,9 @@ Class PPTXVideo : PPTXFile
 
     [bool]CreateWarning($entry)
     {
-        $this.filesize = $entry.Length
-        if ($this.filesize -gt 10KB) {
-            $this.warning += "Cette vidéo prend " + ($this.filesize / 1MB).ToString("0.00") + "MB"
-            return $true;
-        }
-        return $false;
+        #Retourne toujours le poid du fichier vidéo comme avertissement
+        $this.warning += "Cette vidéo prend " + ($this.filesize / 1MB).ToString("0.00") + "MB"
+        return $true;
     }
 
     [string]GenerateHTML([bool]$isChild)
@@ -639,7 +645,9 @@ Class PPTXExcel : PPTXFile
     }
 
     hidden [void] AnalyzeFile() {
-
+        #On retrouve les images sous xl/drawings/drawingX.xml
+        #et les fichiers + règles de formattage conditionnel sous xl/sheets/sheetX.xml
+        
         #On incrémente et vérifie si le drawing existe (commencent à 1)
         $i = 1
         $drawingExist = $true;
@@ -774,8 +782,8 @@ Class PPTXExcel : PPTXFile
     hidden [string[]]CreateWarning() {
         [string[]]$warningMsg = @()
 
-        if ($this.conditionalFormat -gt 5) {
-            $warningMsg += "Il y a " + $this.conditionalFormat + " régles de formattage conditionnel."
+        if ($this.conditionalFormat -gt 100) {
+            $warningMsg += "Il y a " + $this.conditionalFormat + " règles de formattage conditionnel."
         }
 
         return $warningMsg
@@ -788,7 +796,7 @@ Class PPTXExcel : PPTXFile
         $hasWarning = $false
 
         $this.filesize = $entry.Length
-        if ($this.filesize -gt 1KB) {
+        if ($this.filesize -gt 1MB) {
             $this.warning += "Ce fichier Excel pèse " + ($this.filesize / 1MB).ToString("0.00") + "MB"
             return $true;
         }
