@@ -239,6 +239,45 @@ function CreateFileWarnings {
     }
 }
 
+function GenerateHTML {
+    param([PPTXFile]$pptxfile, [bool]$isChild)
+
+        $imgClass = "PPTXFile_img " + $pptxfile.GetType().Name + "_img"
+        $style = ""
+        $class = "order1"
+
+        if ($isChild) {
+            $imgClass = "PPTX_others " + $pptxfile.GetType().Name + "_img"
+            $style = 'style="font-size:0.9em";'
+            $class = "order4"
+        }
+
+        $html = ' <div class="PPTXFile ' + $class + '"><div class="line" ' + $style + '><div class="' + $imgClass + '">' + $pptxfile.GetType().Name[4] + '</div>'`
+            + '<span class="name">' + $pptxfile.name + '</span></div>'
+
+        if ($this.warning) {
+            $html += '<div class="line line_child"><div class="PPTX_others ' + $pptxfile.GetType().Name + '_img">-</div>'`
+            + '<span class="name nameLarge">Général</span><span class="slide"> </span><div class="colFlex">'
+
+            foreach ($warning in $pptxfile.warning) {
+                $html += '<span class="warning">' + $warning + '</span>'
+            }
+
+            $html += '</div></div>'
+        }
+
+
+        foreach ($file in $pptxfile.arrayImages) {
+            if ($file.warning -or $file.GetType().Name -eq "PPTXPowerPoint" -or $file.GetType().Name -eq "PPTXExcel" -or $file.GetType().Name -eq "PPTXWord") {
+                $html = $html + $file.GenerateHTML($true)
+            }
+        }
+
+        $html = $html + '</div>'
+
+        return $html
+}
+
 function GenerateHTMLReport {
     param([PPTXFile]$file)
 
@@ -303,86 +342,141 @@ function GenerateHTMLReport {
 	
 		<!-- Style -->
 		.content {
-			width: 97%;
-			margin: auto;
-			font-size: 1.1em;
-			font-family: "Segoe UI";
-		}
+	        width: 97%;
+	        margin: auto;
+	        font-family: "Segoe UI";
+        }
 
-		.PPTXFile {
-			margin: 10px;
-			padding: 5px 10px;
-			border: solid 1px #e2e2e2;
-			font-family: "Segoe UI";
-			font-weight: 400;
-		}
+        .PPTXFile {
+	        display: -moz-flex;
+            display: -ms-flexbox;
+	        display: flex;
+	        -ms-flex-direction: column;
+	        flex-direction: column;
+	        margin: 10px;
+	        padding: 5px 10px;
+	        border: solid 1px #e2e2e2;
+	        font-family: "Segoe UI";
+	        font-weight: 400;
+	        font-size: 16px;
+        }
 
-		.PPTXFile_img {
-			height: 36px;
-			width: 40px;
-			font-weight: 300;
-			font-size: 1.4em;
-			color: #fefefe;
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			margin-right: 6px;
-			padding-bottom: 4px;
-			float: left;
-		}
+        .PPTXFile_img {
+	        display: -moz-flex;
+            display: -ms-flexbox;
+	        display: flex;
+	        height: 36px;
+	        width: 40px;
+	        font-weight: 300;
+	        font-size: 22px;
+	        color: #fefefe;
+            align-items: center;
+            justify-content: center;
+	        margin-right: 6px;
+	        padding-bottom: 4px;
+        }
 
-		.PPTX_others {
-			height: 27px;
-			width: 30px;
-			background-color: #c2c2c2;
-			font-family: "Segoe UI";
-			font-weight: 300;
-			font-size: 1.2em;
-			color: #fefefe;
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			margin-right: 6px;
-			padding-bottom: 3px;
-			float: left;
-		}
+        .PPTX_others {
+	        display: -moz-flex;
+            display: -ms-flexbox;
+	        display: flex;
+	        height: 27px;
+	        width: 30px;
+	        background-color: #c2c2c2;
+	        font-weight: 300;
+	        font-size: 16px;
+	        color: #fefefe;
+            align-items: center;
+            justify-content: center;
+	        margin-right: 6px;
+	        padding-bottom: 3px;
+        }
 
-		.PPTXImage {
-			max-width: 100px;
-			max-height: 75px;
-			margin: 10px 10px 0px 0px;
-		}
+        .PPTXImage {
+	        max-width: 100px;
+	        max-height: 75px;
+	        margin: 10px 10px 0px 0px;
+        }
 
-		.PPTXWord_img {
-			background-color: #164FB3;
-		}
+        .PPTXWord_img {
+	        background-color: #164FB3;
+        }
 
-		.PPTXExcel_img {
-			background-color: #06663C;
-		}
+        .PPTXExcel_img {
+	        background-color: #06663C;
+        }
 
-		.PPTXPowerPoint_img {
-			background-color: #D64206;
-		}
+        .PPTXPowerPoint_img {
+	        background-color: #D64206;
+        }
 
-		.line {
-			min-height: 40px;
-			display: flex;
-			align-items: center;
-			justify-content: left;
-		}
+        .line {
+	        display: -moz-flex;
+            display: -ms-flexbox;
+	        display: flex;
+            -ms-flex-wrap: wrap;
+            flex-wrap: wrap;
+	        min-height: 40px;
+            align-items: center;
+            justify-content: left;
+        }
 
-		.line_child {
-			margin-left: 20px;
-			font-size: 0.75em;
-		}
+        .line_child {
+	        margin-left: 20px;
+	        font-size: 13px;
+        }
 
-		.warning {
-			font-size: 0.9em;
-			font-weight: 600;
-			color: #C8B906;
-			margin-left: 20px;
-		}
+        .name {
+	        min-width: 90px;
+	        margin-left: 10px;
+        }
+
+        .nameLarge {
+            margin-left: 74px;
+        }
+
+        .slide {
+	        min-width: 70px;
+	        margin-left: 20px;
+	        font-size: 13px;
+	        font-style: italic;
+        }
+
+        .colFlex {
+	        display: -moz-flex;
+            display: -ms-flexbox;
+	        display: flex;
+	        -ms-flex-direction: column;
+	        flex-direction: column;
+        }
+
+        .warning {
+	        font-size: 12px;
+	        font-weight: 600;
+	        color: #C8B906;
+	        margin: 2px;
+            max-width: 500px;
+        }
+
+        .order1 {
+	        -ms-flex-order: -1;
+	        order: -1;
+        }
+
+        .order2 {
+	        -ms-flex-order: 2;
+	        order: 2;
+        }
+
+        .order3 {
+	        -ms-flex-order: 3;
+	        order: 3;
+        }
+
+        .order4 {
+	        -ms-flex-order: 4;
+	        order: 3;
+        }
 	</style>
 </head>
 
@@ -410,7 +504,7 @@ Class PPTXFile
     [int[]]$slides
     [int]$filesize
     [int]$total
-    [string]$warning
+    [string[]]$warning
 }
 
 Class PPTXImage : PPTXFile
@@ -453,16 +547,16 @@ Class PPTXImage : PPTXFile
             $ratioX = ([double]$width * 9525) / $this.cx
             $ratioY = ([double]$height * 9525) / $this.cy
 
-            if ($ratioX -ge 4 -and $ratioY -ge 4) {
-                $this.warning = "La taille de cette image est " + $ratioX.ToString("0.0") + " fois plus grande que son utilisation"
+            if ($ratioX -ge 2 -and $ratioY -ge 2 -and [double]$width -gt 200) {
+                $this.warning += "La taille de cette image est " + $ratioX.ToString("0.0") + " fois plus grande que son utilisation"
                 $hasWarning = $true
             }
 
         }
 
         $this.filesize = $entry.Length
-        if ($this.filesize -gt 1KB) {
-            #$this.warning = "Cette image à un poid supérieur à 1KB"
+        if ($this.filesize -gt 1MB) {
+            $this.warning += "Cette image prend " + ($this.filesize / 1MB).ToString("0.00") + "MB"
             $hasWarning = $true
         }
 
@@ -471,8 +565,23 @@ Class PPTXImage : PPTXFile
 
     [string]GenerateHTML([bool]$isChild)
     {
-        $html = '<div class="line line_child"><img class="PPTXImage" src="' + $this.decompressPath `
-            + "/" + $this.name +'" />' + $this.name + ' <span class="warning">' + $this.warning + '</span></div>'
+        $html = '<div class="line line_child"><div style="width:100px;"><img class="PPTXImage" src="' + $this.decompressPath `
+            + "/" + $this.name +'" /></div><span class="name">' + $this.name + '</span><span class="slide">'
+        
+        for($i=0;$i -lt $this.slides.Length;$i++) {
+            $html += $this.slides[$i]
+            if ($i-lt $this.slides.Length - 1) {
+                $html += ", "
+            }
+        }
+
+        $html += '</span><div class="colFlex">'
+
+        foreach ($warning in $this.warning) {
+            $html += '<span class="warning">' + $warning + '</span>'
+        }
+
+        $html += '</div></div>'
         return $html
     }
 }
@@ -490,7 +599,7 @@ Class PPTXVideo : PPTXFile
     {
         $this.filesize = $entry.Length
         if ($this.filesize -gt 10KB) {
-            $this.warning = "Cette vidéo à un poid supérieur à 10KB"
+            $this.warning += "Cette vidéo prend " + ($this.filesize / 1MB).ToString("0.00") + "MB"
             return $true;
         }
         return $false;
@@ -498,8 +607,14 @@ Class PPTXVideo : PPTXFile
 
     [string]GenerateHTML([bool]$isChild)
     {
-        $html = '<div class="line line_child"><div class="PPTX_others">V</div>'`
-            + $this.name + '<span class="warning">' + $this.warning + '</span></div>'
+        $html = '<div class="line line_child order2"><div class="PPTX_others">V</div>'`
+            + '<span class="name nameLarge">' + $this.name + '</span><span class="slide">' + $this.slides + '</span><div class="colFlex">'
+
+        foreach ($warning in $this.warning) {
+            $html += '<span class="warning">' + $warning + '</span>'
+        }
+
+        $html += '</div></div>'
         return $html
     }
 }
@@ -656,11 +771,11 @@ Class PPTXExcel : PPTXFile
         CreateFileWarnings $this
     }
 
-    hidden [string]CreateWarning() {
-        $warningMsg = ""
+    hidden [string[]]CreateWarning() {
+        [string[]]$warningMsg = @()
 
         if ($this.conditionalFormat -gt 5) {
-            $warningMsg += "Il y a " + $this.conditionalFormat + " régles de formattage conditionnel. "
+            $warningMsg += "Il y a " + $this.conditionalFormat + " régles de formattage conditionnel."
         }
 
         return $warningMsg
@@ -672,12 +787,9 @@ Class PPTXExcel : PPTXFile
 
         $hasWarning = $false
 
-        #Warning vide pour toujours afficher ces fichiers
-        $this.warning = " "
-
         $this.filesize = $entry.Length
         if ($this.filesize -gt 1KB) {
-            $this.warning = "Ce fichier Excel à un poid supérieur à 1KB. "
+            $this.warning += "Ce fichier Excel pèse " + ($this.filesize / 1MB).ToString("0.00") + "MB"
             return $true;
         }
 
@@ -688,25 +800,7 @@ Class PPTXExcel : PPTXFile
 
     [string]GenerateHTML([bool]$isChild)
     {
-        $imgClass = "PPTXFile_img PPTXExcel_img"
-        $style = ""
-
-        if ($isChild) {
-            $imgClass = "PPTX_others PPTXExcel_img"
-            $style = 'style="font-size:0.9em";'
-        }
-
-        $html = ' <div class="PPTXFile"><div class="line" ' + $style + '><div class="' + $imgClass + '">E</div>'`
-            + $this.name + '<span class="warning">' + $this.warning + '</span></div>'
-
-        foreach ($file in $this.arrayImages) {
-            if ($file.warning) {
-                $html = $html + $file.GenerateHTML($true)
-            }
-        }
-
-        $html = $html + '</div>'
-        return $html
+        return GenerateHTML $this $isChild
     }
 }
 
@@ -818,33 +912,14 @@ Class PPTXPowerPoint : PPTXFile
     {
         CallAnalyzeFromEntry $this $entry
 
-        #Warning vide pour toujours afficher ces fichiers
-        $this.warning = " "
+        #Pas d'avertissement sur les fichiers PowerPoint pour l'instant
 
         return $false;
     }
 
     [string]GenerateHTML([bool]$isChild)
     {
-        $imgClass = "PPTXFile_img PPTXPowerPoint_img"
-        $style = ""
-
-        if ($isChild) {
-            $imgClass = "PPTX_others PPTXPowerPoint_img"
-            $style = 'style="font-size:0.9em";'
-        }
-
-        $html = ' <div class="PPTXFile"><div class="line" ' + $style + '><div class="' + $imgClass + '">P</div>'`
-            + $this.name + '<span class="warning">' + $this.warning + '</span></div>'
-
-        foreach ($file in $this.arrayImages) {
-            if ($file.warning) {
-                $html = $html + $file.GenerateHTML($true)
-            }
-        }
-
-        $html = $html + '</div>'
-        return $html
+        return GenerateHTML $this $isChild
     }
 }
 
@@ -946,12 +1021,9 @@ Class PPTXWord : PPTXFile
     {
         CallAnalyzeFromEntry $this $entry
 
-        #Warning vide pour toujours afficher ces fichiers
-        $this.warning = " "
-
         $this.filesize = $entry.Length
         if ($this.filesize -gt 3KB) {
-            $this.warning = "Ce fichier Word à un poid supérieur à 3KB"
+            $this.warning += "Ce fichier Word pèse " + ($this.filesize / 1MB).ToString("0.00") + "MB"
             return $true;
         }
         return $false;
@@ -959,26 +1031,7 @@ Class PPTXWord : PPTXFile
 
     [string]GenerateHTML([bool]$isChild)
     {
-        $imgClass = "PPTXFile_img PPTXWord_img"
-        $style = ""
-
-        if ($isChild) {
-            $imgClass = "PPTX_others PPTXWord_img"
-            $style = 'style="font-size:0.9em";'
-        }
-
-        $html = ' <div class="PPTXFile"><div class="line" ' + $style + '><div class="' + $imgClass + '">W</div>'`
-            + $this.name + '<span class="warning">' + $this.warning + '</span></div>'
-
-        foreach ($file in $this.arrayImages) {
-            if ($file.warning) {
-                $html = $html + $file.GenerateHTML($true)
-            }
-        }
-
-        $html = $html + '</div>'
-
-        return $html
+        return GenerateHTML $this $isChild
     }
 }
 
@@ -1010,7 +1063,7 @@ if (($result -eq "OK") -and $openFileDialog.CheckFileExists) {
     }
 
     #Affichage temporaire
-    $analyzedFile.arrayImages | Where-Object {$_.warning}
+    #$analyzedFile.arrayImages | Where-Object {$_.warning}
 
     #Génération du rapport HTML
     $html = GenerateHTMLReport $analyzedFile
