@@ -52,6 +52,23 @@ function ExtractImgToFile {
     [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dPath)
 }
 
+function ColTexttoNum {
+    param([string]$colText)
+
+    $index = -1
+    $exp = 0
+    $colNum = 0
+
+    #36 = $
+    while ([byte]$colText[$index] -ne 0 -and [byte]$colText[$index] -ne 36) {
+        $colNum += ([byte]$colText[$index] - 64) * [math]::pow(26, $exp)
+        $index--
+        $exp++
+    }
+
+    return $colNum
+}
+
 function GetImageFromXML {
     param([PPTXFile[]]$rIds, $pic)
 
@@ -630,6 +647,7 @@ Class PPTXExcel : PPTXFile
     [PPTXFile[]]$arrayImages
     hidden $zipArchive
     [int]$conditionalFormat
+    [int]$nbSameCondFormat
 
     PPTXExcel ([string]$name, [bool]$analyseNow)
     {
@@ -749,6 +767,169 @@ Class PPTXExcel : PPTXFile
                 #Formattage conditionnel
                 $this.conditionalFormat += $docContent.worksheet.conditionalFormatting.Count
 
+
+                #Valide pour "A2" "ABX141249" "$A2" "$A$2"
+                $regexExp = "'?([a-zA-Z0-9\s\[\]\.])*'?!?\`$?[A-Z]+\`$?[0-9]+(:\`$?[A-Z]+\`$?[0-9]+)?"
+
+                #Pour éviter des comparaisons inutiles
+                $condFormatIsCopy = @($false) * $docContent.worksheet.conditionalFormatting.Count
+
+                for($j=0;$j -lt $docContent.worksheet.conditionalFormatting.Count;$j++) {
+                    if ($condFormatIsCopy[$j] -eq $false) {
+                        
+                        #Partie "statique" de la formule source
+                        [string[]]$staticFormula = $docContent.worksheet.conditionalFormatting[$j].cfRule.formula -split $regexExp | ? {$_}
+
+                        #Référence: Endroit où s'applique la formule (position la plus à gauche et la position la plus haute dans les cellules listées)
+                        $ref = $docContent.worksheet.conditionalFormatting[$j].sqref.split(" ").split(":") -split '(?=\d)',2 | Sort-Object
+                        $ref_X = -1
+
+                        for($p=$ref.count/2;$p -lt $ref.count;$p++) {
+                            $tmp = ColTexttoNum $ref[$p]
+                            if ($tmp -lt $ref_X -or $ref_X -eq -1) {
+                                $ref_X = $tmp
+                            }                            
+                        }
+
+                        $tmp = [int[]]$ref[0..(($ref.count/2)-1)] | sort-object
+                        $ref_Y = $tmp[0]
+
+                        #Partie "dynamique" de la formule source (les cellules)
+                        [string[]]$cells = [regex]::Matches($docContent.worksheet.conditionalFormatting[$j].cfRule.formula, $regexExp).value
+                        $relativeVar = @()
+                        
+                        foreach ($cell in $cells) {
+                            $tmp = $cell -split '(?=\$?\d)',2
+
+                            if ($tmp[0][0] -eq "$") {
+                                $relativeVar += @{"Value" = (ColTexttoNum $tmp[0]); "isFixed"= $true }
+                            }
+                            else {
+                                $relativeVar += @{"Value" = (ColTexttoNum $tmp[0]) - $ref_X; "isFixed"= $false }
+                            }
+
+                            if ($tmp[1][0] -eq "$") {
+                                $relativeVar += @{"Value" = [int]$tmp[1].remove(0,1); "isFixed"= $true }
+                            }
+                            else {
+                                $relativeVar += @{"Value" = $tmp[1] - $ref_Y; "isFixed"= $false }
+                            }
+                        }
+
+                        #On itère à travers les formules suivantes si elle ne sont pas déjà identique à une autre
+                        for($p=$j + 1;$p -lt $docContent.worksheet.conditionalFormatting.Count;$p++) {
+                            if ($condFormatIsCopy[$p] -eq $false) {
+                                #On considère les formule identiques jusqu'à preuve du contraire
+                                $areIdentical = $true
+                                
+                                #Comparaison de la partie "statique" de la formule (sans variables)
+                                [string[]]$staticFormula2 = $docContent.worksheet.conditionalFormatting[$p].cfRule.formula -split $regexExp | ? {$_}
+
+                                $arrayIndex1 = 0;
+                                $arrayIndex2 = 0;
+
+                                if($staticFormula.count -ge $staticFormula2.Count) {
+                                    $maxLength = $staticFormula.Count
+                                }
+                                else {
+                                    $maxLength = $staticFormula2.Count
+                                }
+
+                                while($arrayIndex1 -lt $maxLength -and $arrayIndex2 -lt $maxLength -and $areIdentical) {
+                                    if($staticFormula[$arrayIndex1][0] -eq ":") {
+                                        $arrayIndex1++
+                                    }
+                                    if($staticFormula2[$arrayIndex2][0] -eq ":") {
+                                        $arrayIndex2++
+                                    }
+
+                                    if($arrayIndex1 -lt $maxLength -and $arrayIndex2 -lt $maxLength) {
+                                        if ($staticFormula[$arrayIndex1] -ne $staticFormula2[$arrayIndex2]) {
+                                            $areIdentical = $false
+                                        }
+                                    }
+
+                                    $arrayIndex1++
+                                    $arrayIndex2++
+                                }
+
+                                if ($areIdentical) {
+                                    #Comparaison des cellules entre les formules
+                                    [string[]]$cells2 = [regex]::Matches($docContent.worksheet.conditionalFormatting[$p].cfRule.formula, $regexExp).value
+
+                                    if($cells.count -eq $cells2.count) {                   
+                                        $ref2 = $docContent.worksheet.conditionalFormatting[$p].sqref.split(" ").split(":") -split '(?=\d)',2 | Sort-Object
+                                        
+                                        #Conversion des lettres en nombres
+                                        $ref2_X = -1
+                                        for($o=$ref2.count/2;$o -lt $ref2.count;$o++) {
+                                            $tmp = ColTexttoNum $ref2[$o]
+                                            if ($tmp -lt $ref2_X -or $ref2_X -eq -1) {
+                                                $ref2_X = $tmp
+                                            }                            
+                                        }
+
+                                        $tmp = [int[]]$ref2[0..(($ref2.count/2)-1)] | sort-object
+                                        $ref2_Y = $tmp[0]
+
+                                        #On sépare la cellule selon X et Y et on compare avec la source
+                                        $index = 0
+                                        foreach ($cell in $cells2) {
+                                            $tmp = $cell -split '(?=\$?\d)',2
+                                            if ($tmp[0][0] -eq "$") {
+                                                if ($relativeVar[$index].isFixed -eq $false) {
+                                                    $areIdentical = $false
+                                                    break
+                                                }
+                                                $relCellX += (ColTexttoNum $tmp[0])
+                                            }
+                                            else {
+                                                if ($relativeVar[$index].isFixed) {
+                                                    $areIdentical = $false
+                                                    break
+                                                }
+                                                $relCellX += (ColTexttoNum $tmp[0]) - $ref2_X
+                                            }
+                                            if ($tmp[1][0] -eq "$") {
+                                                if ($relativeVar[$index].isFixed -eq $false) {
+                                                    $areIdentical = $false
+                                                    break
+                                                }
+                                                $relCellY += [int]$tmp[1].remove(0,1)
+                                            }
+                                            else {
+                                                if ($relativeVar[$index].isFixed) {
+                                                    $areIdentical = $false
+                                                    break
+                                                }
+                                                $relCellY += $tmp[1] - $ref2_Y
+                                            }
+
+                                            if($relCellX -ne $relativeVar[$index].value) {
+                                                $areIdentical = $false
+                                                break
+                                            }
+                                            if($relCellY -ne $relativeVar[$index + 1].value) {
+                                                $areIdentical = $false
+                                                break
+                                            }
+                                            $index = $index + 2
+                                        }
+                                    }
+                                    else {
+                                        $areIdentical = $false
+                                    }                                    
+
+                                    #Mise à jour des informations dans la table
+                                    $condFormatIsCopy[$p] = $areIdentical
+                                }
+                            }
+                        }
+                    }
+                }
+
+                $this.nbSameCondFormat += ($condFormatIsCopy | Where-Object -FilterScript { $_ -eq $true }).Count
+
                 #Référence dans le fichier xml.rels 
                 $relsPath = "xl/worksheets/_rels/sheet" + $i + ".xml.rels"
                 $entry = $this.zipArchive.GetEntry($relsPath)
@@ -784,6 +965,10 @@ Class PPTXExcel : PPTXFile
 
         if ($this.conditionalFormat -gt 100) {
             $warningMsg += "Il y a " + $this.conditionalFormat + " règles de formattage conditionnel."
+        }
+
+        if ($this.nbSameCondFormat -gt 10) {
+            $warningMsg += "Il y a " + $this.nbSameCondFormat + " règles de formattage conditionnel identiques."
         }
 
         return $warningMsg
@@ -1079,7 +1264,7 @@ if (($result -eq "OK") -and $openFileDialog.CheckFileExists) {
     $html | Out-File -filepath $path
 
     Invoke-Item $path
-    start-sleep 5
+    start-sleep 10
 
     #Détruit les fichiers temporaires
     if(Test-Path $appTempPath) {
