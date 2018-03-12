@@ -920,6 +920,16 @@ Class PPTXExcel : PPTXFile
                                         $areIdentical = $false
                                     }                                    
 
+                                    #Vérifie si le style appliqué est le même
+                                    $stylePath = "xl/styles.xml"
+                                    $entry = $this.zipArchive.GetEntry($stylePath)
+
+                                    $stylesContent = GetEntryAsXML $entry
+
+                                    if ($stylesContent.styleSheet.dxfs.ChildNodes[$docContent.worksheet.conditionalFormatting[$j].cfRule.dxfId].InnerXml -ne $stylesContent.styleSheet.dxfs.ChildNodes[$docContent.worksheet.conditionalFormatting[$p].cfRule.dxfId].InnerXml) {
+                                        $areIdentical = $false
+                                    }
+
                                     #Mise à jour des informations dans la table
                                     $condFormatIsCopy[$p] = $areIdentical
                                 }
@@ -967,7 +977,7 @@ Class PPTXExcel : PPTXFile
             $warningMsg += "Il y a " + $this.conditionalFormat + " règles de formattage conditionnel."
         }
 
-        if ($this.nbSameCondFormat -gt 10) {
+        if ($this.nbSameCondFormat -gt 2) {
             $warningMsg += "Il y a " + $this.nbSameCondFormat + " règles de formattage conditionnel identiques."
         }
 
