@@ -388,10 +388,25 @@ function GetRelsFromXML {
                 $newItem = [PPTXWord]::new($newItemName, $false)
             }
             else {
-                $newItem = [PPTXFile]::new()
-                $newItem.name = $newItemName
+                $newItem = [PPTXOther]::new($newItemName, $RIdItem.filetype)
             }
                                 
+            $newItem.slides = @($slideNum)
+            $newItem.total = $RIdItem.total
+            $file.arrayImages += $newItem
+        }
+    }
+
+    #Autres
+    else {
+        if (($file.arrayImages.Count -gt 0) -and ($file.arrayImages.Name -contains $image)) {
+            $indexImage = $file.arrayImages.name.indexof($image)
+
+            $file.arrayImages[$indexImage].Total = $file.arrayImages[$indexImage].Total + $RIdItem.Total
+            $file.arrayImages[$indexImage].Slides += $slideNum
+        }
+        else {
+            $newItem = [PPTXOther]::new($image, $RIdItem.filetype)
             $newItem.slides = @($slideNum)
             $newItem.total = $RIdItem.total
             $file.arrayImages += $newItem
@@ -422,7 +437,7 @@ function CreateFileWarnings {
             $filePath = $startPath + "media/" + $file.Name
         }
 
-        elseif ($file.GetType().Name -eq "PPTXPowerPoint" -or $file.GetType().Name -eq "PPTXExcel" -or $file.GetType().Name -eq "PPTXWord") {
+        else {
             $filePath = $startPath + "embeddings/" + $file.Name.Split("\")[-1]
         }
 
@@ -697,6 +712,7 @@ Class PPTXFile
     [int]$filesize
     [int]$total
     [string[]]$warning
+
 }
 
 Class PPTXImage : PPTXFile
@@ -799,6 +815,7 @@ Class PPTXVideo : PPTXFile
     [bool]CreateWarning($entry)
     {
         #Retourne toujours le poid du fichier vidéo comme avertissement
+        $this.filesize = $entry.Length
         $this.warning += "Cette vidéo prend " + ($this.filesize / 1MB).ToString("0.00") + "MB"
         return $true;
     }
@@ -807,6 +824,41 @@ Class PPTXVideo : PPTXFile
     {
         $html = '<div class="line line_child order2"><div class="PPTX_others">V</div>'`
             + '<span class="name nameLarge">' + $this.name + '</span><span class="slide">' + $this.slides + '</span><div class="colFlex">'
+
+        foreach ($warning in $this.warning) {
+            $html += '<span class="warning">' + $warning + '</span>'
+        }
+
+        $html += '</div></div>'
+        return $html
+    }
+}
+
+Class PPTXOther : PPTXFile
+{
+    [string]$filetype
+
+    PPTXOther ([string]$name, $filetype)
+    {
+        $this.name = $name
+        $this.filetype = $filetype
+    }
+
+    [bool]CreateWarning($entry)
+    {
+        $hasWarning = $false
+        $this.filesize = $entry.Length
+        if ($this.filesize -gt 1MB) {
+            $this.warning += "Cet élément prend " + ($this.filesize / 1MB).ToString("0.00") + "MB"
+            $hasWarning = $true
+        }
+        return $hasWarning
+    }
+
+    [string]GenerateHTML([bool]$isChild)
+    {
+        $html = '<div class="line line_child order2"><div class="PPTX_others">+</div>'`
+            + '<span class="name nameLarge">' + $this.filetype + ' (' + $this.name + ')' + '</span><span class="slide">' + $this.slides + '</span><div class="colFlex">'
 
         foreach ($warning in $this.warning) {
             $html += '<span class="warning">' + $warning + '</span>'
@@ -903,7 +955,7 @@ Class PPTXExcel : PPTXFile
 
                 $docContent = GetEntryAsXML $entry
             
-                #Image
+                #Fichiers
                 $namespace = @{mc = "http://schemas.openxmlformats.org/markup-compatibility/2006"}
                 $fallbacks = $docContent | Select-Xml -Namespace $namespace -XPath "//mc:Fallback"
             
@@ -929,8 +981,7 @@ Class PPTXExcel : PPTXFile
                                 $newItem = [PPTXPowerPoint]::new($rId, $false)
                             }
                             else {
-                                $newItem = [PPTXFile]::new()
-                                $newItem.name = $rId
+                                $newItem = [PPTXOther]::new($rId, $itemType)
                             }
                             
                             $newItem.total = 1
@@ -1145,8 +1196,7 @@ Class PPTXPowerPoint : PPTXFile
                                 $newItem = [PPTXPowerPoint]::new($rId, $false)
                             }
                             else {
-                                $newItem = [PPTXFile]::new()
-                                $newItem.name = $rId
+                                $newItem = [PPTXOther]::new($rId, $itemtype)
                             }
                             
                             $newItem.total = 1
