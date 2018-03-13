@@ -49,7 +49,10 @@ function CallAnalyzeFromName {
 function ExtractImgToFile {
     param($entry, [string]$dPath)
 
-    [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dPath)
+    $alreadyExists = Test-Path $dPath
+    if($alreadyExists -eq $false) {
+        [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dPath)
+    }
 }
 
 function ColTexttoNum {
@@ -1191,14 +1194,20 @@ Class PPTXPowerPoint : PPTXFile
                 $slideContent = GetEntryAsXML $entry
 
                 #Image et Vidéo
-                foreach ($pic in $slideContent.sld.csld.sptree.pic) {
+                $namespace = @{p = "http://schemas.openxmlformats.org/presentationml/2006/main"}
+                $pics = $slideContent | Select-Xml -Namespace $namespace -XPath "//p:pic"
+
+                foreach ($pic in $pics.Node) {
                     $rIds = GetImageFromXML $rIds $pic
                 }
 
                 #Documents
-                foreach ($graphic in $slideContent.sld.csld.sptree.graphicframe) {
+                $namespace = @{mc = "http://schemas.openxmlformats.org/markup-compatibility/2006"}
+                $alternateContents = $slideContent | Select-Xml -Namespace $namespace -XPath "//mc:AlternateContent"
+
+                foreach ($alternateContent in $alternateContents.Node) {
                     #rID
-                    $rId = $graphic.graphic.graphicdata.alternatecontent.fallback.oleobj.id
+                    $rId = $alternateContent.choice.oleobj.id
 
                     if ($rId -ne $null) {
                         if (($rIds.Count -gt 0) -and ($rIds.Name -contains $rId)) {
@@ -1206,7 +1215,7 @@ Class PPTXPowerPoint : PPTXFile
                             $rIds[$index].Total++
                         }
                         else {
-                            $itemtype = $graphic.graphic.graphicData.AlternateContent.Fallback.oleObj.progId.Substring(0,4)
+                            $itemtype = $alternateContent.choice.oleObj.progId.Substring(0,4)
 
                             if ($itemType -eq "Word") {
                                 $newItem = [PPTXWord]::new($rId, $false)
@@ -1218,8 +1227,8 @@ Class PPTXPowerPoint : PPTXFile
                                 $newItem = [PPTXPowerPoint]::new($rId, $false)
                             }
                             else {
-                                $newItem = [PPTXOther]::new($rId, $graphic.graphic.graphicdata.alternatecontent.choice.oleObj.progId)
-                                $newItem.image = $graphic.graphic.graphicdata.alternatecontent.fallback.oleobj.pic.blipfill.blip.embed
+                                $newItem = [PPTXOther]::new($rId, $alternateContent.choice.oleObj.progId)
+                                $newItem.image = $alternateContent.fallback.oleobj.pic.blipfill.blip.embed
                             }
                             
                             $newItem.total = 1
