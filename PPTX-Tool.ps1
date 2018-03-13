@@ -308,7 +308,7 @@ function GetImageFromXML {
 }
 
 function GetRelsFromXML {
-    param([PPTXFile]$file, [PPTXFile]$RIdItem, $xml, $slideNum)
+    param([PPTXFile]$file, [PPTXFile]$RIdItem, $xmlNode, $slideNum)
 
     $image = $xmlNode.Target.split("/")[-1]
 
@@ -407,6 +407,8 @@ function GetRelsFromXML {
         }
         else {
             $newItem = [PPTXOther]::new($image, $RIdItem.filetype)
+            $newItem.image = $RIdItem.image
+            $newItem.decompressPath = $appTempPath + "\" + $file.name.Substring(0, $file.name.Length - 5)
             $newItem.slides = @($slideNum)
             $newItem.total = $RIdItem.total
             $file.arrayImages += $newItem
@@ -431,6 +433,16 @@ function CreateFileWarnings {
 
         elseif ($pptxfile.GetType().Name -eq "PPTXExcel") {
             $startPath = "xl/"
+        }
+
+        if ($file.GetType().Name -eq "PPTXOther") {
+            $entry = $pptxfile.zipArchive.GetEntry($startPath + "media/" + $file.image)
+            $dPath = $file.decompressPath + "\" + $file.image
+            $DirExists = Test-Path $file.decompressPath
+            if ($DirExists -eq $false) {
+                New-Item -ItemType directory -Path $file.decompressPath
+            }
+            ExtractImgToFile $entry $dPath
         }
 
         if ($file.GetType().Name -eq "PPTXImage" -or $file.GetType().Name -eq "PPTXVideo") {
@@ -634,7 +646,7 @@ function GenerateHTMLReport {
         }
 
         .name {
-	        min-width: 90px;
+	        min-width: 110px;
 	        margin-left: 10px;
         }
 
@@ -733,7 +745,7 @@ Class PPTXImage : PPTXFile
         $hasWarning = $false
 
         $dPath = $this.decompressPath + "\" + $this.name
-        $DirExists = Test-Path $dPath 
+        $DirExists = Test-Path $this.decompressPath 
         if ($DirExists -eq $false) {
             New-Item -ItemType directory -Path $this.decompressPath
         }
@@ -804,9 +816,6 @@ Class PPTXImage : PPTXFile
 
 Class PPTXVideo : PPTXFile
 {
-    #Cette information n'est probablement pas pertinente (devrait décompresser le fichier pour accéder aux metadatas)
-    #[double]$length
-
     PPTXVideo ([string]$name)
     {
         $this.name = $name
@@ -837,6 +846,8 @@ Class PPTXVideo : PPTXFile
 Class PPTXOther : PPTXFile
 {
     [string]$filetype
+    [string]$image
+    [string]$decompressPath
 
     PPTXOther ([string]$name, $filetype)
     {
@@ -847,8 +858,9 @@ Class PPTXOther : PPTXFile
     [bool]CreateWarning($entry)
     {
         $hasWarning = $false
+
         $this.filesize = $entry.Length
-        if ($this.filesize -gt 1MB) {
+        if ($this.filesize -gt 1KB) {
             $this.warning += "Cet élément prend " + ($this.filesize / 1MB).ToString("0.00") + "MB"
             $hasWarning = $true
         }
@@ -857,8 +869,18 @@ Class PPTXOther : PPTXFile
 
     [string]GenerateHTML([bool]$isChild)
     {
-        $html = '<div class="line line_child order2"><div class="PPTX_others">+</div>'`
-            + '<span class="name nameLarge">' + $this.filetype + ' (' + $this.name + ')' + '</span><span class="slide">' + $this.slides + '</span><div class="colFlex">'
+        
+
+        $imgtype = $this.image -split "\."
+        if ($imgtype[1] -ne "wmf") {
+            $firstCol = '<div style="width:100px;"><img class="PPTXImage" src="' + $this.decompressPath `
+            + "/" + $this.image +'" /></div><span class="name">'
+        }
+        else {            $firstCol = '<div class="PPTX_others">...</div><span class="name nameLarge">'
+        }
+
+        $html = '<div class="line line_child order2">' + $firstCol + $this.filetype + '</span><span class="slide">'`
+            + $this.slides + '</span><div class="colFlex">'
 
         foreach ($warning in $this.warning) {
             $html += '<span class="warning">' + $warning + '</span>'
@@ -942,7 +964,7 @@ Class PPTXExcel : PPTXFile
             $i++
         }
 
-        #On incrémente et vérifie si le sheet existe (commencent à 1)
+        #On incrémente et vérifie si la feuille existe (commencent à 1)
         $i = 1
         $sheetExist = $true;
         while($sheetExist -eq $true) {
@@ -957,11 +979,11 @@ Class PPTXExcel : PPTXFile
             
                 #Fichiers
                 $namespace = @{mc = "http://schemas.openxmlformats.org/markup-compatibility/2006"}
-                $fallbacks = $docContent | Select-Xml -Namespace $namespace -XPath "//mc:Fallback"
+                $choices = $docContent | Select-Xml -Namespace $namespace -XPath "//mc:Choice"
             
-                foreach ($fallback in $fallbacks.Node) {
+                foreach ($choice in $choices.Node) {
                     #rID
-                    $rId = $fallback.oleObject.id
+                    $rId = $choice.oleObject.id
 
                     if ($rId -ne $null) {
                         if (($rIds.Count -gt 0) -and ($rIds.Name -contains $rId)) {
@@ -969,7 +991,7 @@ Class PPTXExcel : PPTXFile
                             $rIds[$index].Total++
                         }
                         else {
-                            $itemType = $fallback.oleObject.progId
+                            $itemType = $choice.oleObject.progId
 
                             if ($itemType -eq "Word") {
                                 $newItem = [PPTXWord]::new($rId, $false)
@@ -982,6 +1004,7 @@ Class PPTXExcel : PPTXFile
                             }
                             else {
                                 $newItem = [PPTXOther]::new($rId, $itemType)
+                                $newItem.image = $choice.oleObject.objectPr.id
                             }
                             
                             $newItem.total = 1
@@ -994,7 +1017,7 @@ Class PPTXExcel : PPTXFile
                 $this.conditionalFormat += $docContent.worksheet.conditionalFormatting.Count
 
 
-                #Valide pour "A2" "ABX141249" "$A2" "$A$2"
+                #Valide pour "A2" "ABX141249" "$A2" "$A$2" "Feuil2!$A$2" etc.
                 $regexExp = "'?([a-zA-Z0-9\s\[\]\.])*'?!?\`$?[A-Z]+\`$?[0-9]+(:\`$?[A-Z]+\`$?[0-9]+)?"
 
                 #Pour éviter des comparaisons inutiles
@@ -1085,6 +1108,11 @@ Class PPTXExcel : PPTXFile
                         else {
                             $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
                         }
+
+                        if ($rIds[$j].GetType().Name -eq "PPTXOther") {                            $imageNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].image})
+                            $rIds[$j].image = $imageNode.Target.split("/")[-1]
+                        }
+
                         GetRelsFromXML $this $rIds[$j] $xmlNode $i
                     }  
                 }
@@ -1196,7 +1224,8 @@ Class PPTXPowerPoint : PPTXFile
                                 $newItem = [PPTXPowerPoint]::new($rId, $false)
                             }
                             else {
-                                $newItem = [PPTXOther]::new($rId, $itemtype)
+                                $newItem = [PPTXOther]::new($rId, $graphic.graphic.graphicdata.alternatecontent.choice.oleObj.progId)
+                                $newItem.image = $graphic.graphic.graphicdata.alternatecontent.fallback.oleobj.pic.blipfill.blip.embed
                             }
                             
                             $newItem.total = 1
@@ -1220,6 +1249,11 @@ Class PPTXPowerPoint : PPTXFile
                         else {
                             $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
                         }  $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
+
+                        if ($rIds[$j].GetType().Name -eq "PPTXOther") {                        $imageNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].image})
+                        $rIds[$j].image = $imageNode.Target.split("/")[-1]
+                    }
+
                         GetRelsFromXML $this $rIds[$j] $xmlNode $i
                     }  
                 }
@@ -1291,12 +1325,12 @@ Class PPTXWord : PPTXFile
             }
 
             #Word, Excel, PowerPoint
-            $namespace = @{o = "urn:schemas-microsoft-com:office:office"}
-            $OLEObjects = $docContent | Select-Xml -Namespace $namespace -XPath "//o:OLEObject"
+            $namespace = @{w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+            $objects = $docContent | Select-Xml -Namespace $namespace -XPath "//w:object"
 
-            foreach ($OLEObject in $OLEObjects.Node) {
+            foreach ($object in $objects.Node) {
                 #rID
-                $rId = $OLEObject.id
+                $rId = $object.OLEObject.id
 
                 if ($rId -ne $null) {
                     if (($rIds.Count -gt 0) -and ($rIds.Name -contains $rId)) {
@@ -1304,7 +1338,7 @@ Class PPTXWord : PPTXFile
                         $rIds[$index].Total++
                     }
                     else {
-                        $itemtype = $OLEObject.progId.Substring(0,4)
+                        $itemtype = $object.OLEObject.progId.Substring(0,4)
 
                         if ($itemType -eq "Word") {
                             $newItem = [PPTXWord]::new($rId, $false)
@@ -1316,8 +1350,8 @@ Class PPTXWord : PPTXFile
                             $newItem = [PPTXPowerPoint]::new($rId, $false)
                         }
                         else {
-                            $newItem = [PPTXFile]::new()
-                            $newItem.name = $rId
+                            $newItem = [PPTXOther]::new($rId, $object.OLEObject.progid)
+                            $newItem.image = $object.shape.imagedata.id
                         }
                             
                         $newItem.total = 1
@@ -1341,6 +1375,11 @@ Class PPTXWord : PPTXFile
                     else {
                         $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
                     }
+
+                    if ($rIds[$j].GetType().Name -eq "PPTXOther") {                        $imageNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].image})
+                        $rIds[$j].image = $imageNode.Target.split("/")[-1]
+                    }
+
                     GetRelsFromXML $this $rIds[$j] $xmlNode 0
                 }  
             }
