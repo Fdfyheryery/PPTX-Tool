@@ -1,13 +1,13 @@
 ﻿<#
 
 .SYNOPSIS
-WIP
+Ce script permet d'analyser les problèmes les plus courants de fichiers Word, Excel, PowerPoint et de leur contenu
 
 .DESCRIPTION
-WIP
+L'analyse de docx, xlsx, pptx, vérifie les éléments suivants: 
+Médias non optimisés, fichiers insérés qui comportent des médias non optimisés, formatages conditionnels inutiles.
 
-.NOTES
-WIP
+L'information est alors affichée sur forme de rapport HTML
 
 #>
 
@@ -977,7 +977,7 @@ Class PPTXExcel : PPTXFile
 
                 $docContent = GetEntryAsXML $entry
             
-                #Fichiers
+                #Documents
                 $namespace = @{mc = "http://schemas.openxmlformats.org/markup-compatibility/2006"}
                 $choices = $docContent | Select-Xml -Namespace $namespace -XPath "//mc:Choice"
             
@@ -993,14 +993,8 @@ Class PPTXExcel : PPTXFile
                         else {
                             $itemType = $choice.oleObject.progId
 
-                            if ($itemType -eq "Word") {
-                                $newItem = [PPTXWord]::new($rId, $false)
-                            }
-                            elseif ($itemType -eq "Exce") {
+                            if ($itemType -eq "Présentation") {
                                 $newItem = [PPTXExcel]::new($rId, $false)
-                            }
-                            elseif ($itemType -eq "Présentation") {
-                                $newItem = [PPTXPowerPoint]::new($rId, $false)
                             }
                             else {
                                 $newItem = [PPTXOther]::new($rId, $itemType)
@@ -1151,12 +1145,12 @@ Class PPTXExcel : PPTXFile
         $this.filesize = $entry.Length
         if ($this.filesize -gt 1MB) {
             $this.warning += "Ce fichier Excel pèse " + ($this.filesize / 1MB).ToString("0.00") + "MB"
-            return $true;
+            $hasWarning = $true;
         }
 
         $this.warning += $this.CreateWarning()
         
-        return $false;
+        return $hasWarning;
     }
 
     [string]GenerateHTML([bool]$isChild)
@@ -1201,7 +1195,7 @@ Class PPTXPowerPoint : PPTXFile
                     $rIds = GetImageFromXML $rIds $pic
                 }
 
-                #Word, Excel, PowerPoint
+                #Documents
                 foreach ($graphic in $slideContent.sld.csld.sptree.graphicframe) {
                     #rID
                     $rId = $graphic.graphic.graphicdata.alternatecontent.fallback.oleobj.id
@@ -1324,7 +1318,7 @@ Class PPTXWord : PPTXFile
                 $rIds = GetImageFromXML $rIds $pic
             }
 
-            #Word, Excel, PowerPoint
+            #Documents
             $namespace = @{w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
             $objects = $docContent | Select-Xml -Namespace $namespace -XPath "//w:object"
 
@@ -1433,16 +1427,15 @@ if (($result -eq "OK") -and $openFileDialog.CheckFileExists) {
         [PPTXExcel]$analyzedFile = [PPTXExcel]::new($openFileDialog.FileName, $true)
     }
 
-    #Affichage temporaire
-    #$analyzedFile.arrayImages | Where-Object {$_.warning}
-
     #Génération du rapport HTML
     $html = GenerateHTMLReport $analyzedFile
     $path = $appTempPath + "\results.html"
     $html | Out-File -filepath $path
 
     Invoke-Item $path
-    start-sleep 10
+
+    #Pour que le navigateur web ait suffisamment de temps pour afficher les images
+    Start-Sleep 10
 
     #Détruit les fichiers temporaires
     if(Test-Path $appTempPath) {
