@@ -316,7 +316,8 @@ function GetRelsFromXML {
     $image = $xmlNode.Target.split("/")[-1]
 
     #Images
-    if ($xmlNode.Type -eq "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image") {
+    if ($xmlNode.Type -eq "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
+        -or $xmlNode.Type -eq "http://schemas.microsoft.com/office/2007/relationships/hdphoto") {
         
         if (($file.arrayImages.Count -gt 0) -and ($file.arrayImages.Name -contains $image)) {
             $indexImage = $file.arrayImages.name.indexof($image)
@@ -723,7 +724,7 @@ function GenerateHTMLReport {
 Class PPTXFile
 {
     [string]$name
-    [int[]]$slides
+    [string[]]$slides
     [int]$filesize
     [int]$total
     [string[]]$warning
@@ -1383,7 +1384,7 @@ Class PPTXWord : PPTXFile
                         $rIds[$j].image = $imageNode.Target.split("/")[-1]
                     }
 
-                    GetRelsFromXML $this $rIds[$j] $xmlNode 0
+                    GetRelsFromXML $this $rIds[$j] $xmlNode " "
                 }  
             }
         }
