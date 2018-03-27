@@ -75,13 +75,15 @@ function ColTexttoNum {
 function ExtractSourceInfo {
     param([string]$formula, $sqref)
 
-    #Partie "statique" de la formule source
+    #Partie "statique" de la formule source (X = lettres, Y = nombres)
     [string[]]$staticFormula = $formula -split $regexExp | ? {$_}
 
     #Référence: Endroit où s'applique la formule (position la plus à gauche et la position la plus haute dans les cellules listées)
     $ref = $sqref.split(" ").split(":") -split '(?=\d)',2 | Sort-Object
     $ref_X = -1
-
+    
+    #Converti chaque combinaison de lettres en nombre pour trouver le plus petit
+    #et pour pouvoir calculer la référence dynamique plus tard
     for($p=$ref.count/2;$p -lt $ref.count;$p++) {
         $tmp = ColTexttoNum $ref[$p]
         if ($tmp -lt $ref_X -or $ref_X -eq -1) {
@@ -89,6 +91,7 @@ function ExtractSourceInfo {
         }                            
     }
 
+    #Trouve le plus petit nombre
     $tmp = [int[]]$ref[0..(($ref.count/2)-1)] | Sort-Object
     $ref_Y = $tmp[0]
 
@@ -108,7 +111,7 @@ function ExtractSourceInfo {
         $tmp = $cell -split '(?=\$?\d)',2
 
         if ($tmp[0][0] -eq "$") {
-            $relativeVar += @{"Value" = (ColTexttoNum $tmp[0]); "isFixed"= $true; "prefix" = $prefix}
+            $relativeVar += @{"Value" = $tmp[0]; "isFixed"= $true; "prefix" = $prefix}
         }
         else {
             $relativeVar += @{"Value" = (ColTexttoNum $tmp[0]) - $ref_X; "isFixed"= $false; "prefix" = $prefix}
@@ -137,14 +140,10 @@ function CompareCondFormatRules {
     $arrayIndex1 = 0;
     $arrayIndex2 = 0;
 
-    if($sourceInfo.StaticFormula.count -ge $staticFormula2.Count) {
-        $maxLength = $sourceInfo.StaticFormula.Count
-    }
-    else {
-        $maxLength = $staticFormula2.Count
-    }
+    $maxLength1 = $sourceInfo.StaticFormula.Count
+    $maxLength2 = $staticFormula2.Count
 
-    while($arrayIndex1 -lt $maxLength -and $arrayIndex2 -lt $maxLength -and $areIdentical) {
+    while($arrayIndex1 -lt $maxLength1 -and $arrayIndex2 -lt $maxLength2) {
         if($sourceInfo.StaticFormula[$arrayIndex1][0] -eq ":") {
             $arrayIndex1++
         }
@@ -155,11 +154,19 @@ function CompareCondFormatRules {
         if($arrayIndex1 -lt $maxLength -and $arrayIndex2 -lt $maxLength) {
             if ($sourceInfo.StaticFormula[$arrayIndex1] -ne $staticFormula2[$arrayIndex2]) {
                 $areIdentical = $false
+                break
             }
         }
 
         $arrayIndex1++
         $arrayIndex2++
+    }
+
+    if ($arrayIndex1 -lt $maxLength1) {
+        $areIdentical = $false
+    }
+    if ($arrayIndex2 -lt $maxLength2) {
+        $areIdentical = $false
     }
 
     if ($areIdentical) {
@@ -204,7 +211,7 @@ function CompareCondFormatRules {
                         $areIdentical = $false
                         break
                     }
-                    $relCellX += (ColTexttoNum $tmp[0])
+                    $relCellX += $tmp[0]
                 }
                 else {
                     if ($sourceInfo.relativeVar[$index].isFixed) {
@@ -971,6 +978,11 @@ Class PPTXExcel : PPTXFile
         #On incrémente et vérifie si la feuille existe (commencent à 1)
         $i = 1
         $sheetExist = $true;
+
+        $stylePath = "xl/styles.xml"
+        $entry = $this.zipArchive.GetEntry($stylePath)
+        $stylesContent = GetEntryAsXML $entry
+
         while($sheetExist -eq $true) {
             $docPath = "xl/worksheets/sheet" + $i + ".xml"
             $entry = $this.zipArchive.GetEntry($docPath)
@@ -1023,24 +1035,33 @@ Class PPTXExcel : PPTXFile
 
                 for($j=0;$j -lt $docContent.worksheet.conditionalFormatting.Count;$j++) {
                     if ($condFormatIsCopy[$j] -eq $false) {
-                        
-                        $sourceInfo = ExtractSourceInfo -formula $docContent.worksheet.conditionalFormatting[$j].cfRule.formula`
-                         -sqref $docContent.worksheet.conditionalFormatting[$j].sqref
+
+                        $sourceInfo = ExtractSourceInfo -formula $docContent.worksheet.conditionalFormatting[$j].cfRule.formula -sqref $docContent.worksheet.conditionalFormatting[$j].sqref
 
                         #On itère à travers les formules suivantes si elle ne sont pas déjà identique à une autre
                         for($p=$j + 1;$p -lt $docContent.worksheet.conditionalFormatting.Count;$p++) {
                             if ($condFormatIsCopy[$p] -eq $false) {
-                                    $areIdentical = CompareCondFormatRules -sourceInfo $sourceInfo -compFormula $docContent.worksheet.conditionalFormatting[$p].cfRule.formula`
-                                     -compSqref $docContent.worksheet.conditionalFormatting[$p].sqref
+                                    $areIdentical = CompareCondFormatRules -sourceInfo $sourceInfo -compFormula $docContent.worksheet.conditionalFormatting[$p].cfRule.formula -compSqref $docContent.worksheet.conditionalFormatting[$p].sqref
 
                                 if ($areIdentical) {
                                     #Vérifie si le style appliqué est le même
-                                    $stylePath = "xl/styles.xml"
-                                    $entry = $this.zipArchive.GetEntry($stylePath)
 
-                                    $stylesContent = GetEntryAsXML $entry
+                                    [int]$cfRuleCountj = $docContent.worksheet.conditionalFormatting[$j].cfRule.Count
+                                    [int]$cfRuleCountp = $docContent.worksheet.conditionalFormatting[$p].cfRule.Count
 
-                                    if ($stylesContent.styleSheet.dxfs.ChildNodes[$docContent.worksheet.conditionalFormatting[$j].cfRule.dxfId].InnerXml -ne $stylesContent.styleSheet.dxfs.ChildNodes[$docContent.worksheet.conditionalFormatting[$p].cfRule.dxfId].InnerXml) {
+                                    if ($cfRuleCountj -eq $cfRuleCountp) {
+                                        for ($n=0;$n -lt $cfRuleCountj;$n++) {
+                                            $indexj = $docContent.worksheet.conditionalFormatting[$j].cfRule[$n].dxfId
+                                            $indexp = $docContent.worksheet.conditionalFormatting[$p].cfRule[$n].dxfId
+                                            [string]$testj = $stylesContent.styleSheet.dxfs.ChildNodes[$indexj].InnerXml
+                                            [string]$testp = $stylesContent.styleSheet.dxfs.ChildNodes[$indexp].InnerXml
+                                            if ($testj -ne $testp) {
+	                                            $areIdentical = $false
+                                                break
+                                            }
+                                        }
+                                    }
+                                    else {
                                         $areIdentical = $false
                                     }
                                 }
@@ -1077,7 +1098,9 @@ Class PPTXExcel : PPTXFile
 
                                 if ($areIdentical) {
                                     #Vérifie si le style appliqué est le même
-                                    if ($condFormatRules.Node[$j].dxf.InnerXml -ne $condFormatRules.Node[$p].dxf.InnerXml) {
+                                    [string]$testj = $condFormatRules.Node[$j].dxf.InnerXml
+                                    [string]$testp = $condFormatRules.Node[$p].dxf.InnerXml
+                                    if ($testj -ne $testp) {
                                         $areIdentical = $false
                                     }
                                 }
