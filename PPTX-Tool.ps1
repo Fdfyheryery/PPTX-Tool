@@ -75,18 +75,21 @@ function ColTexttoNum {
 function ExtractSourceInfo {
     param([string]$formula, $sqref, $dxfid, [string]$type, [string]$operator)
 
+    #Valide pour "A2" "ABX141249" "$A2" "$A$2" "Feuil2!$A$2" etc.
+    $regexExp = "'?([a-zA-Z0-9\s\[\]\.])*'?!?\`$?[A-Z]+\`$?[0-9]+(:\`$?[A-Z]+\`$?[0-9]+)?"
+
     #Partie "statique" de la formule source (X = lettres, Y = nombres)
-    [string[]]$staticFormula = $formula -split $regexExp | ? { $_ }
+    [string[]]$staticFormula = $formula -split $regexExp
 
     #Référence: Endroit où s'applique la formule (position la plus à gauche et la position la plus haute dans les cellules listées)
-    $ref = $sqref.split("[: ]") -split '(?=\d)',2 | Sort-Object
-    
+    $ref = $sqref -split "[: ]" -split '(?=\d)',2 | Sort-Object -property { $_.length }, { $_ }
+
     #Trouve et converti la plus petite lettre pour calculer la référence dynamique plus tard
-    $tmp = $ref[($ref.count/2)..$ref.count] | Sort-Object -property { $_.length }, { $_ }
+    $tmp = $ref -match "[a-z]"
     $ref_X = ColTexttoNum $tmp[0]
 
     #Trouve le plus petit nombre
-    $tmp = [int[]]$ref[0..(($ref.count/2)-1)] | Sort-Object
+    $tmp = $ref -match "[0-9]"
     $ref_Y = $tmp[0]
 
     #Partie "dynamique" de la formule source (les cellules)
@@ -108,21 +111,21 @@ function ExtractSourceInfo {
         #  v  = Value
         # [f] = Fixed ($)
         if ($tmp[0] -match "\$.*") {
-            $relativeVar += "v" + $tmp[0] + "f" + $prefix
+            $relativeVar = $relativeVar + "v" + $tmp[0] + "f" + $prefix
         }
         else {
-            $relativeVar += "v" + ((ColTexttoNum $tmp[0]) - $ref_X) + $prefix
+            $relativeVar = $relativeVar + "v" + ((ColTexttoNum $tmp[0]) - $ref_X) + $prefix
         }
 
         if ($tmp[1] -match "\$.*") {
-            $relativeVar += "v" + $tmp[1] + "f" + $prefix
+            $relativeVar = $relativeVar + "v" + $tmp[1] + "f" + $prefix
         }
         else {
-            $relativeVar += "v" + ($tmp[1] - $ref_Y) + $prefix
+            $relativeVar = $relativeVar + "v" + ($tmp[1] - $ref_Y) + $prefix
         }
     }
 
-    return @{"values" = "f" + $staticFormula + $type + $operator + "rv" + $relativeVar; "dxfids" = $dxfid}
+    return @{"values" = "f" + $staticFormula + $type + $operator + $relativeVar; "dxfids" = $dxfid}
 }
 
 function GetImageFromXML {
@@ -897,25 +900,22 @@ Class PPTXExcel : PPTXFile
                 #Formattage conditionnel (références locales)
                 $this.conditionalFormat += $docContent.worksheet.conditionalFormatting.Count
 
-
-                #Valide pour "A2" "ABX141249" "$A2" "$A$2" "Feuil2!$A$2" etc.
-                $regexExp = "'?([a-zA-Z0-9\s\[\]\.])*'?!?\`$?[A-Z]+\`$?[0-9]+(:\`$?[A-Z]+\`$?[0-9]+)?"
-
                 $sourceInfoList = New-Object System.Collections.ArrayList
 
                 for($j=0;$j -lt $docContent.worksheet.conditionalFormatting.Count;$j++) {
-                        $sourceInfo = ExtractSourceInfo -formula $docContent.worksheet.conditionalFormatting[$j].cfRule.formula -sqref $docContent.worksheet.conditionalFormatting[$j].sqref -dxfid $docContent.worksheet.conditionalFormatting[$j].cfRule.dxfId -type $docContent.worksheet.conditionalFormatting[$j].cfRule.type -operator $docContent.worksheet.conditionalFormatting[$j].cfRule.operator
+                        $cfNode = $docContent.worksheet.conditionalFormatting[$j]
+                        $sourceInfo = ExtractSourceInfo -formula $cfNode.cfRule.formula -sqref $cfNode.sqref -dxfid $cfNode.cfRule.dxfId -type $cfNode.cfRule.type -operator $cfNode.cfRule.operator
                         $sourceInfoList.add($sourceInfo)
                 }
 
-                $groupInfoList = $sourceInfoList | Group @{e={$_."values"}}
+                $groupInfoList = $sourceInfoList | Group {$_."values"}
 
                 $dxfInnerXmlList = New-Object System.Collections.ArrayList
                 for($j=0;$j -lt $groupInfoList.name.count;$j++) {
                     for ($p=0;$p -lt $groupInfoList[$j].Group.count;$p++) {
                         $dxfInnerXml = ""
                         for ($n=0;$n -lt $groupInfoList[$j].Group[$p].dxfids.count;$n++) {
-                            $dxfInnerXml += $stylesContent.styleSheet.dxfs.ChildNodes[$groupInfoList[$j].Group[$p].dxfids[$n]].InnerXml
+                            $dxfInnerXml = $dxfInnerXml + $stylesContent.styleSheet.dxfs.ChildNodes[$groupInfoList[$j].Group[$p].dxfids[$n]].InnerXml
                         }
                         $dxfInnerXmlList.add($dxfInnerXml)
                     }
@@ -936,14 +936,14 @@ Class PPTXExcel : PPTXFile
                 $sourceInfoList = New-Object System.Collections.ArrayList
 
                 for($j=0;$j -lt $condFormatRules.Count;$j++) {
-                        
-                        $sourceInfo = ExtractSourceInfo -formula $condFormatRules.Node[$j].cfRule.f`
-                         -sqref $condFormatRules.Node[$j].sqref -dxfid $j -type $condFormatRules.Node[$j].cfRule.type -operator $condFormatRules.Node[$j].cfRule.operator
+                        $cfNode = $condFormatRules.Node[$j]
+                        $sourceInfo = ExtractSourceInfo -formula $cfNode.cfRule.f`
+                         -sqref $cfNode.sqref -dxfid $j -type $cfNode.cfRule.type -operator $cfNode.cfRule.operator
 
                         $sourceInfoList.add($sourceInfo)
                 }
 
-                $groupInfoList = $sourceInfoList | Group @{e={$_."values"}}
+                $groupInfoList = $sourceInfoList | Group {$_."values"}
 
                 $dxfInnerXmlList = New-Object System.Collections.ArrayList
                 for($j=0;$j -lt $groupInfoList.name.count;$j++) {
