@@ -76,14 +76,13 @@ function ExtractSourceInfo {
     param([string]$formula, $sqref, $dxfid, [string]$type, [string]$operator)
 
     #Partie "statique" de la formule source (X = lettres, Y = nombres)
-    [string[]]$staticFormula = $formula -split $regexExp | ? {$_}
+    [string[]]$staticFormula = $formula -split $regexExp | ? { $_ }
 
     #Référence: Endroit où s'applique la formule (position la plus à gauche et la position la plus haute dans les cellules listées)
     $ref = $sqref.split("[: ]") -split '(?=\d)',2 | Sort-Object
     
-    #Converti chaque combinaison de lettres en nombre pour trouver le plus petit
-    #et pour pouvoir calculer la référence dynamique plus tard
-    $tmp = $ref[($ref.count/2)..$ref.count] | Sort-Object { $_.length }
+    #Trouve et converti la plus petite lettre pour calculer la référence dynamique plus tard
+    $tmp = $ref[($ref.count/2)..$ref.count] | Sort-Object -property { $_.length }, { $_ }
     $ref_X = ColTexttoNum $tmp[0]
 
     #Trouve le plus petit nombre
@@ -105,6 +104,9 @@ function ExtractSourceInfo {
 
         $tmp = $cell -split '(?=\$?\d)',2
 
+        #For debug:
+        #  v  = Value
+        # [f] = Fixed ($)
         if ($tmp[0] -match "\$.*") {
             $relativeVar += "v" + $tmp[0] + "f" + $prefix
         }
@@ -899,13 +901,9 @@ Class PPTXExcel : PPTXFile
                 #Valide pour "A2" "ABX141249" "$A2" "$A$2" "Feuil2!$A$2" etc.
                 $regexExp = "'?([a-zA-Z0-9\s\[\]\.])*'?!?\`$?[A-Z]+\`$?[0-9]+(:\`$?[A-Z]+\`$?[0-9]+)?"
 
-                #Pour éviter des comparaisons inutiles
-                $condFormatIsCopy = @($false) * $docContent.worksheet.conditionalFormatting.Count
-                
                 $sourceInfoList = New-Object System.Collections.ArrayList
 
                 for($j=0;$j -lt $docContent.worksheet.conditionalFormatting.Count;$j++) {
-                        
                         $sourceInfo = ExtractSourceInfo -formula $docContent.worksheet.conditionalFormatting[$j].cfRule.formula -sqref $docContent.worksheet.conditionalFormatting[$j].sqref -dxfid $docContent.worksheet.conditionalFormatting[$j].cfRule.dxfId -type $docContent.worksheet.conditionalFormatting[$j].cfRule.type -operator $docContent.worksheet.conditionalFormatting[$j].cfRule.operator
                         $sourceInfoList.add($sourceInfo)
                 }
@@ -929,46 +927,38 @@ Class PPTXExcel : PPTXFile
                     $this.nbSameCondFormat += ($groupDxfList[$j].count - 1)
                 }
 
-                $this.nbSameCondFormat += ($condFormatIsCopy | Where-Object -FilterScript { $_ -eq $true }).Count
-
                 #Formattage conditionnel (références externes)
                 $namespace = @{x14 = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"}
                 $condFormatRules = $docContent | Select-Xml -Namespace $namespace -XPath "//x14:conditionalFormatting"
 
                 $this.conditionalFormat += $condFormatRules.Count
 
-                #Pour éviter des comparaisons inutiles
-                $condFormatIsCopy = @($false) * $condFormatRules.Count
+                $sourceInfoList = New-Object System.Collections.ArrayList
 
                 for($j=0;$j -lt $condFormatRules.Count;$j++) {
-                    if ($condFormatIsCopy[$j] -eq $false) {
                         
                         $sourceInfo = ExtractSourceInfo -formula $condFormatRules.Node[$j].cfRule.f`
-                         -sqref $condFormatRules.Node[$j].sqref
+                         -sqref $condFormatRules.Node[$j].sqref -dxfid $j -type $condFormatRules.Node[$j].cfRule.type -operator $condFormatRules.Node[$j].cfRule.operator
 
-                        #On itère à travers les formules suivantes si elle ne sont pas déjà identique à une autre
-                        for($p=$j + 1;$p -lt $condFormatRules.Count;$p++) {
-                            if ($condFormatIsCopy[$p] -eq $false) {
-                                    $areIdentical = CompareCondFormatRules -sourceInfo $sourceInfo -compFormula $condFormatRules.Node[$p].cfRule.f`
-                                     -compSqref $condFormatRules.Node[$p].sqref
+                        $sourceInfoList.add($sourceInfo)
+                }
 
-                                if ($areIdentical) {
-                                    #Vérifie si le style appliqué est le même
-                                    [string]$testj = $condFormatRules.Node[$j].dxf.InnerXml
-                                    [string]$testp = $condFormatRules.Node[$p].dxf.InnerXml
-                                    if ($testj -ne $testp) {
-                                        $areIdentical = $false
-                                    }
-                                }
-                                    
-                                #Mise à jour des informations dans la table
-                                $condFormatIsCopy[$p] = $areIdentical
-                            }
-                        }
+                $groupInfoList = $sourceInfoList | Group @{e={$_."values"}}
+
+                $dxfInnerXmlList = New-Object System.Collections.ArrayList
+                for($j=0;$j -lt $groupInfoList.name.count;$j++) {
+                    for ($p=0;$p -lt $groupInfoList[$j].Group.count;$p++) {
+                        $indexDxf = $groupInfoList[$j].Group[$p].dxfids
+                        [string]$dxfInnerXml = $condFormatRules.Node[$indexDxf].dxf.InnerXml
+                        $dxfInnerXmlList.add($dxfInnerXml)
                     }
                 }
 
-                $this.nbSameCondFormat += ($condFormatIsCopy | Where-Object -FilterScript { $_ -eq $true }).Count
+                $groupDxfList = $dxfInnerXmlList | Group
+
+                for($j=0;$j -lt $groupDxfList.name.count;$j++) {
+                    $this.nbSameCondFormat += ($groupDxfList[$j].count - 1)
+                }
                 
                 #Référence dans le fichier xml.rels 
                 $relsPath = "xl/worksheets/_rels/sheet" + $i + ".xml.rels"
