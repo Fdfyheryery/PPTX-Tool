@@ -400,7 +400,7 @@ function GenerateHTMLReport {
     <link rel="stylesheet" href="css/reset.css">
     <link rel="stylesheet" href="css/style.css">
 	<style>
-		<!-- Reset -->
+        /* Reset */
 		html, body, div, span, applet, object, iframe,
 		h1, h2, h3, h4, h5, h6, p, blockquote, pre,
 		a, abbr, acronym, address, big, cite, code,
@@ -443,8 +443,7 @@ function GenerateHTMLReport {
 			border-collapse: collapse;
 			border-spacing: 0;
 		}
-	
-		<!-- Style -->
+	    /* Style */
 		.content {
 	        width: 97%;
 	        margin: auto;
@@ -500,6 +499,11 @@ function GenerateHTMLReport {
 	        max-width: 100px;
 	        max-height: 75px;
 	        margin: 10px 10px 0px 0px;
+	        cursor: pointer;
+        }
+
+        .PPTXImage:hover {
+	        opacity: 0.7;
         }
 
         .PPTXWord_img {
@@ -581,6 +585,54 @@ function GenerateHTMLReport {
 	        -ms-flex-order: 4;
 	        order: 3;
         }
+        /* Modal adapted from https://www.w3schools.com/howto/howto_css_modal_images.asp */
+        .modal {
+            display: none; 
+            position: fixed; 
+            z-index: 1; 
+            padding-top: 100px; 
+            left: 0;
+            top: 0;
+            width: 100%; 
+            height: 100%; 
+            overflow: auto; 
+            background-color: rgb(0,0,0); 
+            background-color: rgba(0,0,0,0.9); 
+        }
+
+        .modalImg {
+	        position: fixed;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%,-50%);
+            z-index: 2;
+            width: auto;
+            height: auto;
+	        max-width: 80%;
+	        max-height: 80%;
+        }
+
+        .modalImg:hover {
+	        opacity: 1;
+        }
+
+        .close {
+            position: absolute;
+            top: 15px;
+            right: 35px;
+            color: #f1f1f1;
+            font-size: 40px;
+            font-weight: bold;
+            transition: 0.3s;
+            z-index:3;
+        }
+
+        .close:hover,
+        .close:focus {
+            color: #bbb;
+            text-decoration: none;
+            cursor: pointer;
+        }
 	</style>
 </head>
 
@@ -593,8 +645,43 @@ function GenerateHTMLReport {
     $html = $html.Replace($appTempPath + "\", "")
 
     #Bloc de fin du fichier
+    #Script adapté de https://www.w3schools.com/howto/howto_css_modal_images.asp
     $html = $html + @"
 	</div>
+    <div id="myModal" class="modal">
+		<span class="close">&times;</span>
+	</div>
+	<script>
+		var modal = document.getElementById('myModal');
+		var span = document.getElementsByClassName("close")[0];
+		var PPTXImages = document.getElementsByClassName("PPTXImage");
+		
+		var i;
+		for (i = 0; i < PPTXImages.length; i++) {
+			PPTXImages[i].onclick = function() {showModal(this)};
+		}
+
+		span.onclick = function() {closeModal()};
+		modal.onclick = function() {closeModal()};
+	
+		var currentImg;
+		
+		function closeModal() {
+			modal.style.display = "none";
+			currentImg.classList.remove('modalImg');
+		}
+		
+		function showModal(img) {
+			if (img.classList.contains('modalImg')) {
+				closeModal();
+			}
+			else {
+				currentImg = img;
+				modal.style.display = "block";
+				img.classList.add('modalImg');
+			}
+		}
+	</script>
 </body>
 </html> 
 "@
