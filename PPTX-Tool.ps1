@@ -357,7 +357,7 @@ function GenerateHTML {
         }
 
         $html = ' <div class="PPTXFile ' + $class + '"><div class="line" ' + $style + '><div class="' + $imgClass + '">' + $pptxfile.GetType().Name[4] + '</div>'`
-            + '<span class="name">' + $pptxfile.name + '</span></div>'
+            + '<span>' + $pptxfile.name + '</span></div>'
 
         if ($this.warning) {
             $html += '<div class="line line_child"><div class="PPTX_others ' + $pptxfile.GetType().Name + '_img">-</div>'`
@@ -535,7 +535,7 @@ function GenerateHTMLReport {
         }
 
         .name {
-	        min-width: 110px;
+	        width: 110px;
 	        margin-left: 10px;
         }
 
@@ -544,10 +544,11 @@ function GenerateHTMLReport {
         }
 
         .slide {
-	        min-width: 70px;
-	        margin-left: 20px;
+	        width: 70px;
+	        margin-left: 15px;
 	        font-size: 13px;
 	        font-style: italic;
+            padding-right: 15px;
         }
 
         .colFlex {
@@ -887,6 +888,11 @@ Class PPTXExcel : PPTXFile
         #On retrouve les images sous xl/drawings/drawingX.xml
         #et les fichiers + règles de formattage conditionnel sous xl/sheets/sheetX.xml
 
+        #Trouve les noms des feuilles
+        $workbookPath = "xl/workbook.xml"
+        $entry = $this.zipArchive.GetEntry($workbookPath)
+        $workbook = GetEntryAsXML $entry
+
         #On incrémente et vérifie si le drawing existe (commencent à 1)
         $i = 1
         $drawingExist = $true;
@@ -895,6 +901,8 @@ Class PPTXExcel : PPTXFile
             $entry = $this.zipArchive.GetEntry($docPath)
 
             if ($entry) {
+                $sheetName = $workbook.workbook.sheets.sheet[$i - 1].name
+                
                 $rIds = $null
                 [PPTXFile[]]$rIds = @()
 
@@ -924,7 +932,7 @@ Class PPTXExcel : PPTXFile
                             $xmlNode = $relsContent.relationships.Relationship.Where({$_.Id -eq $rIds[$j].name})
                         }
                         
-                        GetRelsFromXML $this $rIds[$j] $xmlNode $i
+                        GetRelsFromXML $this $rIds[$j] $xmlNode $sheetname
                     }  
                 }
             }
@@ -949,6 +957,8 @@ Class PPTXExcel : PPTXFile
             $entry = $this.zipArchive.GetEntry($docPath)
 
             if ($entry) {
+                $sheetName = $workbook.workbook.sheets.sheet[$i - 1].name
+                
                 $rIds = $null
                 [PPTXFile[]]$rIds = @()
 
@@ -1067,7 +1077,7 @@ Class PPTXExcel : PPTXFile
                             $rIds[$j].image = $imageNode.Target.split("/")[-1]
                         }
 
-                        GetRelsFromXML $this $rIds[$j] $xmlNode $i
+                        GetRelsFromXML $this $rIds[$j] $xmlNode $sheetname
                     }  
                 }
             }
@@ -1184,7 +1194,11 @@ Class PPTXPowerPoint : PPTXFile
                                 $newItem = [PPTXPowerPoint]::new($rId, $false)
                             }
                             else {
-                                $newItem = [PPTXOther]::new($rId, $alternateContent.choice.oleObj.progId)
+                                $newItemName = $alternateContent.choice.oleObj.name
+                                if ($alternateContent.choice.oleObj.progid -eq "Package") {
+                                    $newItemName = "Dossier compressé"
+                                }
+                                $newItem = [PPTXOther]::new($rId, $newItemName)
                                 $newItem.image = $alternateContent.fallback.oleobj.pic.blipfill.blip.embed
                             }
                             
@@ -1401,7 +1415,7 @@ if (($result -eq "OK") -and $openFileDialog.CheckFileExists) {
     Invoke-Item $path
 
     #Pour que le navigateur web ait suffisamment de temps pour afficher les images
-    Start-Sleep 10
+    Start-Sleep 30
 
     #Détruit les fichiers temporaires
     if(Test-Path $appTempPath) {
