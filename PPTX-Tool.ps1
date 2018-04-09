@@ -40,7 +40,14 @@ function CallAnalyzeFromEntry {
 function CallAnalyzeFromName {
     param([PPTXFile]$file, [string]$name)
 
-    $file.zipArchive = [System.IO.Compression.ZipFile]::OpenRead($name)
+    try {
+        $file.zipArchive = [System.IO.Compression.ZipFile]::OpenRead($name)
+    }
+    catch {
+        $wshell = New-Object -ComObject Wscript.Shell
+        $wshell.Popup("Impossible d'accéder au fichier, car il est en cours d'utilisation par un autre processus. L'analyse est annulée.",0,"Office Analyser")
+    }
+
     $file.AnalyzeFile()
     $file.zipArchive.Dispose()
 }
@@ -833,7 +840,7 @@ Class PPTXOther : PPTXFile
         $hasWarning = $false
 
         $this.filesize = $entry.Length
-        if ($this.filesize -gt 1KB) {
+        if ($this.filesize -gt 1MB) {
             $this.warning += "Cet élément prend " + ($this.filesize / 1MB).ToString("0.00") + "MB"
             $hasWarning = $true
         }
@@ -1099,7 +1106,7 @@ Class PPTXExcel : PPTXFile
             $warningMsg += "Il y a " + $this.conditionalFormat + " règles de formattage conditionnel."
         }
 
-        if ($this.nbSameCondFormat -gt 2) {
+        if ($this.nbSameCondFormat -gt 25) {
             $warningMsg += "Il y a " + $this.nbSameCondFormat + " règles de formattage conditionnel identiques."
         }
 
@@ -1367,7 +1374,7 @@ Class PPTXWord : PPTXFile
         CallAnalyzeFromEntry $this $entry
 
         $this.filesize = $entry.Length
-        if ($this.filesize -gt 3KB) {
+        if ($this.filesize -gt 1MB) {
             $this.warning += "Ce fichier Word pèse " + ($this.filesize / 1MB).ToString("0.00") + "MB"
             return $true;
         }
@@ -1415,10 +1422,33 @@ if (($result -eq "OK") -and $openFileDialog.CheckFileExists) {
     Invoke-Item $path
 
     #Pour que le navigateur web ait suffisamment de temps pour afficher les images
-    Start-Sleep 30
+    Start-Sleep 30    
 
-    #Détruit les fichiers temporaires
     if(Test-Path $appTempPath) {
+        #Copie le répertoire sur le réseau
+        $random = Get-Random -max 1000
+        $datetime = Get-Date -UFormat "%Y%m%d - %H%M%S"
+        $folder = "path_to_a_folder"
+        $folderName = $folder + $datetime + "." + $random
+
+        while (Test-Path $folderName) {
+            $random = Get-Random -max 1000
+            $folderName = $folder + $datetime + "." + $random
+        }
+
+        #Ajoute une entrée au fichier de log
+        $logFilePath = $folder + "logs.txt"
+        $currentDateTime = Get-Date
+		
+        "{0:D2}" -f $currentDateTime.Year + "{0:D2}" -f $currentDateTime.Month + "{0:D2}" -f $currentDateTime.Day +`
+        " {0:D2}" -f $currentDateTime.Hour + ":{0:D2}" -f $currentDateTime.Minute + ":{0:D2}" -f $currentDateTime.Second + `
+            "," + $env:ComputerName + `
+            "," + $env:UserName + `
+            "," + $openFileDialog.filename + `
+            "," + ((Get-Item $openFileDialog.FileName).length / 1KB).ToString("0") | Out-File $logFilePath -Append
+
+        #Supprime la version locale
+        Copy-Item -Path $appTempPath -Destination $folderName -recurse
         Remove-Item $appTempPath -Force -Recurse
     }
     
