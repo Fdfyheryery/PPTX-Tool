@@ -46,6 +46,7 @@ function CallAnalyzeFromName {
     catch {
         $wshell = New-Object -ComObject Wscript.Shell
         $wshell.Popup("Impossible d'accéder au fichier, car il est en cours d'utilisation par un autre processus. L'analyse est annulée.",0,"Office Analyser")
+        break
     }
 
     $file.AnalyzeFile()
