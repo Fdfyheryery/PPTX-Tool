@@ -12,6 +12,7 @@ L'information est alors affichée sur forme de rapport HTML
 #>
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+add-type -AssemblyName System.Drawing
 
 #Emplacement des fichiers décompressés (images pour rapport HTML)
 $appTempPath = $Env:temp + "\PPTX-Tool"
@@ -735,25 +736,20 @@ Class PPTXImage : PPTXFile
         $objShell = New-Object -ComObject Shell.Application 
         $objFolder = $objShell.namespace($this.decompressPath) 
         $File = $objFolder.ParseName($this.name)
+        $image = New-Object System.Drawing.Bitmap $File.path
 
-        #Calcul du ratio,  pas de metadata sur les emf et wmf
-        $fileExt = $File.name.Split(".")[-1]
-        if ($fileExt -ne "emf" -and $fileExt -ne "wmf") {
-            $width = $objFolder.getDetailsOf($File, 162)
-            $height = $objFolder.getDetailsOf($File, 164)
+        $width = $image.Width
+        $height = $image.Height
+        
+        $ratioX = ([double]$width * 9525) / $this.cx
+        $ratioY = ([double]$height * 9525) / $this.cy
 
-            $width = $width.replace(" pixels","").remove(0,1)
-            $height = $height.replace(" pixels","").remove(0,1)
-
-            $ratioX = ([double]$width * 9525) / $this.cx
-            $ratioY = ([double]$height * 9525) / $this.cy
-
-            if ($ratioX -ge 2 -and $ratioY -ge 2 -and [double]$width -gt 200) {
-                $this.warning += "La taille de cette image est " + $ratioX.ToString("0.0") + " fois plus grande que son utilisation"
-                $hasWarning = $true
-            }
-
+        if ($ratioX -ge 2 -and $ratioY -ge 2 -and [double]$width -gt 200) {
+            $this.warning += "La taille de cette image est " + $ratioX.ToString("0.0") + " fois plus grande que son utilisation"
+            $hasWarning = $true
         }
+
+        $image.Dispose()
 
         if ($this.utilisationH -le 90000) {
             $this.warning += "Seulement " + ($this.utilisationH / 1000).ToString("0") + "% de l'image est utilisée horizontalement"
